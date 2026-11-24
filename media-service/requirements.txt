@@ -1,0 +1,12 @@
+# ReelForge media-service (versions verified locally on Python 3.12, 2026-11-24)
+fastapi==0.165.0
+uvicorn[standard]==0.54.0
+pydantic-settings==2.16.3
+httpx==0.28.1
+numpy==2.5.5
+soundfile==0.14.0
+faster-whisper==1.2.1
+kokoro==0.9.4
+misaki[en]==0.9.4
+piper-tts==1.8.0
+# torch is installed separately from the CPU index (see Dockerfile / README)

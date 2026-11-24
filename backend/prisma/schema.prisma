@@ -1,0 +1,604 @@
+// ReelForge AI — relational model (docs/IMPLEMENTATION_PLAN.md §5)
+// UUID primary keys, created/updated timestamps, soft deletion where appropriate.
+// Large files live in storage; only keys + metadata are stored here.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "esm"
+  runtime      = "nodejs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/* ============================== enums ============================== */
+
+enum UserRole {
+  owner
+  editor
+  viewer
+}
+
+enum ReferenceSource {
+  url
+  upload
+}
+
+enum ReferenceStatus {
+  queued
+  extracting
+  extracted
+  analyzing
+  analyzed
+  needs_upload
+  failed
+}
+
+enum StoryCategory {
+  kids_moral
+  emotional
+  motivation
+  rabbit_squirrel_adventure
+  friendship_kindness
+  family
+  funny_animals
+  inspirational
+}
+
+enum Language {
+  en
+  hi
+  hinglish
+}
+
+enum StoryStatus {
+  draft
+  scripted
+  in_production
+  archived
+}
+
+enum ReferenceImageKind {
+  sheet
+  pose
+  expression
+  uploaded
+}
+
+enum VoiceEngine {
+  kokoro
+  piper
+}
+
+enum MediaKind {
+  reference_video
+  reference_frame
+  character_image
+  scene_image
+  scene_clip
+  voice
+  music
+  sfx
+  subtitle
+  video
+  thumbnail
+  other
+}
+
+enum ProjectStatus {
+  queued
+  generating
+  awaiting_review
+  approved
+  rejected
+  changes_requested
+  publishing
+  published
+  failed
+}
+
+enum GenerationStage {
+  story
+  storyboard
+  voice
+  animation
+  audio
+  editing
+  render
+  validation
+}
+
+enum JobStatus {
+  queued
+  active
+  retrying
+  completed
+  failed
+  cancelled
+}
+
+enum VersionStatus {
+  rendering
+  ready
+  approved
+  rejected
+  changes_requested
+  superseded
+  failed
+}
+
+enum ApprovalDecision {
+  approved
+  rejected
+  changes_requested
+}
+
+enum Platform {
+  youtube
+  instagram
+}
+
+enum AccountStatus {
+  connected
+  expired
+  revoked
+  error
+}
+
+enum PublishStatus {
+  scheduled
+  queued
+  uploading
+  published
+  failed
+  cancelled
+  manual_required
+}
+
+enum LogLevel {
+  info
+  warn
+  error
+}
+
+/* ============================== identity ============================== */
+
+model User {
+  id           String        @id @default(uuid()) @db.Uuid
+  email        String        @unique
+  passwordHash String
+  displayName  String
+  role         UserRole      @default(owner)
+  lastLoginAt  DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  deletedAt    DateTime?
+  approvals    Approval[]
+  activities   ActivityLog[]
+}
+
+/* ============================== references ============================== */
+
+model ReferenceVideo {
+  id           String             @id @default(uuid()) @db.Uuid
+  url          String?
+  platform     String
+  source       ReferenceSource
+  status       ReferenceStatus    @default(queued)
+  category     StoryCategory?
+  title        String?
+  author       String?
+  caption      String?
+  transcript   String?
+  durationSec  Float?
+  metadata     Json?
+  extractor    String?
+  error        String?
+  thumbnailKey String?
+  videoAssetId String?            @db.Uuid
+  videoAsset   MediaAsset?        @relation("ReferenceVideoAsset", fields: [videoAssetId], references: [id], onDelete: SetNull)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  deletedAt    DateTime?
+  analysis     ReferenceAnalysis?
+  stories      Story[]            @relation("StoryReferences")
+
+  @@index([status])
+  @@index([category])
+}
+
+model ReferenceAnalysis {
+  id               String         @id @default(uuid()) @db.Uuid
+  referenceId      String         @unique @db.Uuid
+  reference        ReferenceVideo @relation(fields: [referenceId], references: [id], onDelete: Cascade)
+  summary          String
+  hook             Json
+  structure        Json
+  pacing           Json
+  transitions      Json
+  visualStyle      Json
+  characterTraits  Json
+  narration        Json
+  emotionalArc     String
+  retentionTactics String[]
+  doNotCopy        String[]
+  model            String
+  promptVersion    String
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+}
+
+/* ============================== stories ============================== */
+
+model Story {
+  id                 String           @id @default(uuid()) @db.Uuid
+  title              String
+  category           StoryCategory
+  language           Language         @default(en)
+  targetAudience     String
+  emotionalObjective String
+  hook               String
+  moral              String
+  /// normalized premise used to reject near-duplicate concepts
+  conceptFingerprint String
+  status             StoryStatus      @default(draft)
+  model              String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  deletedAt          DateTime?
+  references         ReferenceVideo[] @relation("StoryReferences")
+  scripts            StoryScript[]
+  projects           VideoProject[]
+
+  @@index([category, createdAt])
+  @@index([conceptFingerprint])
+}
+
+model StoryScript {
+  id                String        @id @default(uuid()) @db.Uuid
+  storyId           String        @db.Uuid
+  story             Story         @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  version           Int
+  isCurrent         Boolean       @default(true)
+  narration         String
+  musicDirection    String
+  voiceInstructions String
+  ending            String
+  youtubeTitle      String
+  youtubeDescription String
+  instagramCaption  String
+  hashtags          String[]
+  feedback          String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  scenes            StoryScene[]
+  versions          VideoVersion[]
+
+  @@unique([storyId, version])
+}
+
+model StoryScene {
+  id           String                @id @default(uuid()) @db.Uuid
+  scriptId     String                @db.Uuid
+  script       StoryScript           @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+  index        Int
+  description  String
+  visualPrompt String
+  camera       String
+  transition   String
+  sfx          String
+  onScreenText String
+  dialogue     Json
+  durationHint Float
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+  characters   StorySceneCharacter[]
+
+  @@unique([scriptId, index])
+}
+
+model StorySceneCharacter {
+  sceneId          String     @db.Uuid
+  scene            StoryScene @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+  characterId      String     @db.Uuid
+  character        Character  @relation(fields: [characterId], references: [id], onDelete: Restrict)
+  expressionPreset String?
+
+  @@id([sceneId, characterId])
+}
+
+/* ============================== characters & voices ============================== */
+
+model Character {
+  id                String                    @id @default(uuid()) @db.Uuid
+  name              String                    @unique
+  description       String
+  appearance        String
+  furColors         String
+  clothingColors    String
+  personality       String
+  basePrompt        String
+  negativePrompt    String                    @default("")
+  seed              Int
+  expressionPresets Json                      @default("{}")
+  isStoryteller     Boolean                   @default(false)
+  active            Boolean                   @default(true)
+  voiceProfileId    String?                   @db.Uuid
+  voiceProfile      VoiceProfile?             @relation(fields: [voiceProfileId], references: [id], onDelete: SetNull)
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+  deletedAt         DateTime?
+  referenceImages   CharacterReferenceImage[]
+  scenes            StorySceneCharacter[]
+}
+
+model CharacterReferenceImage {
+  id           String             @id @default(uuid()) @db.Uuid
+  characterId  String             @db.Uuid
+  character    Character          @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  mediaAssetId String             @db.Uuid
+  mediaAsset   MediaAsset         @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
+  kind         ReferenceImageKind
+  isPrimary    Boolean            @default(false)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  @@index([characterId])
+}
+
+model VoiceProfile {
+  id         String      @id @default(uuid()) @db.Uuid
+  name       String      @unique
+  engine     VoiceEngine
+  voiceId    String
+  language   Language
+  speed      Float       @default(1.0)
+  style      String      @default("")
+  isNarrator Boolean     @default(false)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  characters Character[]
+}
+
+/* ============================== media ============================== */
+
+model MediaAsset {
+  id              String                    @id @default(uuid()) @db.Uuid
+  kind            MediaKind
+  storageKey      String                    @unique
+  mime            String
+  bytes           BigInt
+  sha256          String
+  width           Int?
+  height          Int?
+  durationSec     Float?
+  provider        String?
+  meta            Json?
+  projectId       String?                   @db.Uuid
+  project         VideoProject?             @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+  deletedAt       DateTime?
+  characterImages CharacterReferenceImage[]
+  references      ReferenceVideo[]          @relation("ReferenceVideoAsset")
+  videoOf         VideoVersion[]            @relation("VersionVideo")
+  thumbnailOf     VideoVersion[]            @relation("VersionThumbnail")
+
+  @@index([projectId, kind])
+}
+
+/* ============================== production ============================== */
+
+model VideoProject {
+  id              String               @id @default(uuid()) @db.Uuid
+  storyId         String               @db.Uuid
+  story           Story                @relation(fields: [storyId], references: [id], onDelete: Restrict)
+  scheduleRunId   String?              @db.Uuid
+  scheduleRun     ScheduleRun?         @relation(fields: [scheduleRunId], references: [id], onDelete: SetNull)
+  status          ProjectStatus        @default(queued)
+  targetPlatforms Platform[]
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  deletedAt       DateTime?
+  jobs            VideoGenerationJob[]
+  versions        VideoVersion[]
+  assets          MediaAsset[]
+
+  @@index([status])
+}
+
+model VideoGenerationJob {
+  id          String          @id @default(uuid()) @db.Uuid
+  projectId   String          @db.Uuid
+  project     VideoProject    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  bullJobId   String          @unique
+  stage       GenerationStage @default(story)
+  status      JobStatus       @default(queued)
+  progress    Int             @default(0)
+  attempt     Int             @default(0)
+  maxAttempts Int             @default(2)
+  error       Json?
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([projectId])
+  @@index([status])
+}
+
+model VideoVersion {
+  id               String           @id @default(uuid()) @db.Uuid
+  projectId        String           @db.Uuid
+  project          VideoProject     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  versionNo        Int
+  scriptId         String           @db.Uuid
+  script           StoryScript      @relation(fields: [scriptId], references: [id], onDelete: Restrict)
+  status           VersionStatus    @default(rendering)
+  videoAssetId     String?          @db.Uuid
+  videoAsset       MediaAsset?      @relation("VersionVideo", fields: [videoAssetId], references: [id], onDelete: SetNull)
+  thumbnailAssetId String?          @db.Uuid
+  thumbnailAsset   MediaAsset?      @relation("VersionThumbnail", fields: [thumbnailAssetId], references: [id], onDelete: SetNull)
+  durationSec      Float?
+  /// ffprobe validation report (resolution, codecs, fps, duration, audio, black frames)
+  validation       Json?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  approvals        Approval[]
+  publishingJobs   PublishingJob[]
+
+  @@unique([projectId, versionNo])
+  @@index([status])
+}
+
+/// Append-only decision log. The publisher re-reads the latest row for a version.
+model Approval {
+  id         String           @id @default(uuid()) @db.Uuid
+  versionId  String           @db.Uuid
+  version    VideoVersion     @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  decision   ApprovalDecision
+  userId     String           @db.Uuid
+  user       User             @relation(fields: [userId], references: [id], onDelete: Restrict)
+  platforms  Platform[]
+  notes      String?
+  decidedAt  DateTime         @default(now())
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+  publishing PublishingJob[]
+
+  @@index([versionId, decidedAt])
+}
+
+/* ============================== publishing ============================== */
+
+model PublishingAccount {
+  id              String          @id @default(uuid()) @db.Uuid
+  platform        Platform        @unique
+  accountId       String
+  accountName     String
+  /// AES-256-GCM ciphertext; never returned by the API
+  encryptedTokens String
+  scopes          String[]
+  status          AccountStatus   @default(connected)
+  expiresAt       DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  jobs            PublishingJob[]
+}
+
+model PublishingJob {
+  id             String            @id @default(uuid()) @db.Uuid
+  versionId      String            @db.Uuid
+  version        VideoVersion      @relation(fields: [versionId], references: [id], onDelete: Restrict)
+  approvalId     String            @db.Uuid
+  approval       Approval          @relation(fields: [approvalId], references: [id], onDelete: Restrict)
+  accountId      String?           @db.Uuid
+  account        PublishingAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  platform       Platform
+  status         PublishStatus     @default(queued)
+  scheduledFor   DateTime?
+  idempotencyKey String            @unique
+  bullJobId      String?
+  attempts       Int               @default(0)
+  lastError      Json?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  published      PublishedVideo?
+
+  /// a version can be published at most once per platform
+  @@unique([versionId, platform])
+  @@index([status, scheduledFor])
+}
+
+model PublishedVideo {
+  id              String           @id @default(uuid()) @db.Uuid
+  publishingJobId String           @unique @db.Uuid
+  publishingJob   PublishingJob    @relation(fields: [publishingJobId], references: [id], onDelete: Restrict)
+  platform        Platform
+  remoteId        String
+  url             String?
+  publishedAt     DateTime
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  analytics       VideoAnalytics[]
+
+  @@unique([platform, remoteId])
+}
+
+model VideoAnalytics {
+  id               String         @id @default(uuid()) @db.Uuid
+  publishedVideoId String         @db.Uuid
+  publishedVideo   PublishedVideo @relation(fields: [publishedVideoId], references: [id], onDelete: Cascade)
+  capturedAt       DateTime       @default(now())
+  views            Int?
+  likes            Int?
+  comments         Int?
+  shares           Int?
+  saves            Int?
+  reach            Int?
+  raw              Json?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@index([publishedVideoId, capturedAt])
+}
+
+/* ============================== automation & system ============================== */
+
+model DailySchedule {
+  id             String          @id @default(uuid()) @db.Uuid
+  enabled        Boolean         @default(false)
+  targetCount    Int             @default(5)
+  /// local time "HH:mm"
+  startTime      String          @default("01:00")
+  timezone       String
+  categories     StoryCategory[]
+  language       Language        @default(en)
+  maxConcurrency Int             @default(1)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  runs           ScheduleRun[]
+}
+
+model ScheduleRun {
+  id         String         @id @default(uuid()) @db.Uuid
+  scheduleId String         @db.Uuid
+  schedule   DailySchedule  @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  runDate    String
+  planned    Int
+  produced   Int            @default(0)
+  failed     Int            @default(0)
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+  projects   VideoProject[]
+
+  @@unique([scheduleId, runDate])
+}
+
+model SystemSetting {
+  key       String   @id
+  value     Json
+  updatedBy String?  @db.Uuid
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ActivityLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  actorUserId String?  @db.Uuid
+  actor       User?    @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  entityType  String
+  entityId    String?
+  action      String
+  level       LogLevel @default(info)
+  message     String
+  data        Json?
+  ip          String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}

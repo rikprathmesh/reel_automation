@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.env
+*.env.local
+infra/.env
+storage/*
+!storage/library/
+storage/library/**/*.mp3
+storage/library/**/*.wav
+.venv/
+__pycache__/
+*.log
+infra/stack.env

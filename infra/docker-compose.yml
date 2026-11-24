@@ -1,0 +1,96 @@
+# ReelForge AI - full stack for a Linux server or a future NVIDIA-GPU machine.
+# On the current Windows laptop the services run natively instead (see RUNNING_NOTES.txt);
+# this file is the deployment path for Docker hosts.
+#
+#   create infra/stack.env with: POSTGRES_PASSWORD, JWT_SECRET, TOKEN_ENCRYPTION_KEY, SERVICE_TOKEN (+ optional PUBLIC_URL,
+#   COMFYUI_URL, YTDLP_COOKIES_FILE, GOOGLE_CLIENT_ID/SECRET, META_APP_ID/SECRET, TZ_NAME) — never commit it
+#   docker compose -f infra/docker-compose.yml --env-file infra/stack.env up -d --build
+#   docker compose -f infra/docker-compose.yml exec ollama ollama pull qwen2.5:7b-instruct
+#
+# ComfyUI is not bundled (images differ per GPU); point COMFYUI_URL at your ComfyUI instance.
+name: reelforge
+
+x-restart: &restart
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    <<: *restart
+    environment:
+      POSTGRES_USER: reelforge
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in stack.env}
+      POSTGRES_DB: reelforge
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U reelforge"], interval: 5s, retries: 20 }
+
+  redis:
+    image: redis:7-alpine
+    <<: *restart
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes: [redisdata:/data]
+    healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 5s, retries: 20 }
+
+  ollama:
+    image: ollama/ollama:latest
+    <<: *restart
+    volumes: [ollama:/root/.ollama]
+    # GPU: uncomment on an NVIDIA host with the container toolkit
+    # deploy: { resources: { reservations: { devices: [{ driver: nvidia, count: 1, capabilities: [gpu] }] } } }
+
+  reference-service:
+    build: ../reference-service
+    <<: *restart
+    environment:
+      SERVICE_TOKEN: ${SERVICE_TOKEN:?set in stack.env}
+      YTDLP_COOKIES_FILE: ${YTDLP_COOKIES_FILE:-}
+    volumes: [storage:/storage, models:/models]
+
+  media-service:
+    build: ../media-service
+    <<: *restart
+    environment:
+      SERVICE_TOKEN: ${SERVICE_TOKEN}
+      COMFYUI_URL: ${COMFYUI_URL:-http://host.docker.internal:8188}
+    volumes: [storage:/storage, models:/models]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+
+  backend:
+    build: ../backend
+    <<: *restart
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      DATABASE_URL: postgresql://reelforge:${POSTGRES_PASSWORD}@postgres:5432/reelforge
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:?set in stack.env}
+      TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:?set in stack.env}
+      SERVICE_TOKEN: ${SERVICE_TOKEN}
+      STORAGE_ROOT: /storage
+      MEDIA_SERVICE_URL: http://media-service:8000
+      REFERENCE_SERVICE_URL: http://reference-service:8100
+      OLLAMA_URL: http://ollama:11434
+      FRONTEND_URL: ${PUBLIC_URL:-http://localhost:3000}
+      PUBLIC_BASE_URL: ${PUBLIC_URL:-http://localhost:3000}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      META_APP_ID: ${META_APP_ID:-}
+      META_APP_SECRET: ${META_APP_SECRET:-}
+      TZ_NAME: ${TZ_NAME:-Asia/Kolkata}
+    volumes: [storage:/storage]
+
+  frontend:
+    build: { context: ../frontend, args: { BACKEND_URL: http://backend:4000 } }
+    <<: *restart
+    depends_on: [backend]
+    ports: ["127.0.0.1:3000:3000"]
+
+volumes:
+  pgdata:
+  redisdata:
+  ollama:
+  storage:
+  models:

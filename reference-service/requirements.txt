@@ -1,0 +1,8 @@
+# ReelForge reference-service (verified on Python 3.12, 2026-11-24)
+fastapi==0.165.0
+uvicorn[standard]==0.54.0
+pydantic-settings==2.16.3
+httpx==0.28.1
+numpy==2.5.5
+yt-dlp==2026.11.23
+faster-whisper==1.2.1

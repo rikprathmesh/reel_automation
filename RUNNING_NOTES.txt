@@ -1,0 +1,112 @@
+REELFORGE AI - HOW TO RUN (local notes)
+=======================================
+Last updated: 24-11-2026. All 9 phases are implemented; see README.md for status
+and what still needs your accounts (YouTube / Instagram) before publishing works.
+
+
+1. QUICK START (every time)
+---------------------------
+
+Prerequisites that start by themselves or stay open:
+  - PostgreSQL 18     Windows service, starts automatically (services.msc -> postgresql-x64-18)
+  - Ollama            open the Ollama app (tray icon). Models live in D:\ai-models\ollama
+
+Then run ONE command in PowerShell:
+
+    cd D:\reel-creator-automation
+    powershell -ExecutionPolicy Bypass -File scripts\start-all.ps1
+
+It opens one window per service (titles start with "ReelForge -"):
+    Redis :6379 | ComfyUI :8188 | reference-service :8100 | media-service :8000
+    backend :4000 | frontend :3000
+
+Wait ~1 minute, open  http://localhost:3000  and sign in with OWNER_EMAIL /
+OWNER_PASSWORD from backend\.env. The Overview page shows the health of every service.
+
+To stop: close the service windows.
+Low on RAM? Start without ComfyUI:  scripts\start-all.ps1 -NoComfy  (no new images then).
+
+
+2. STARTING SERVICES BY HAND (same as the script)
+-------------------------------------------------
+
+Redis:              cd D:\tools\redis\Redis-8.10.3-Windows-x64-msys2
+                    .\redis-server.exe reelforge.conf
+ComfyUI:            cd D:\ai-models\ComfyUI
+                    .\.venv\Scripts\python.exe main.py --cpu --listen 127.0.0.1 --port 8188
+reference-service:  cd D:\reel-creator-automation\reference-service
+                    .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8100
+media-service:      cd D:\reel-creator-automation\media-service
+                    $env:HF_HOME='D:/ai-models/hf'
+                    .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+backend:            cd D:\reel-creator-automation\backend
+                    npm run build ; npm start        (or: npm run dev while editing code)
+frontend:           cd D:\reel-creator-automation\frontend
+                    npm run dev
+
+
+3. MAKING A REEL
+----------------
+
+Content Studio -> pick category + language -> "Generate reel".
+On this CPU-only laptop one reel takes roughly 1 hour (story ~10 min, each image ~6 min,
+voices, motion, render). Jobs run one at a time on purpose (16 GB RAM).
+Finished reels appear in Review Studio. Approve -> Publishing Center. Nothing is ever
+published without your approval; rejected reels are never published.
+
+Daily automation: Settings -> Schedule (OFF by default). It only CREATES reels overnight.
+
+
+4. TAKE CARE (important)
+------------------------
+
+- Secrets live in backend\.env, reference-service\.env, media-service\.env.
+  Never share or commit them (they are git-ignored).
+- In DATABASE_URL, an "@" in the password must be written as %40.
+- Don't change JWT_SECRET or TOKEN_ENCRYPTION_KEY after connecting YouTube/Instagram
+  (saved account tokens would no longer decrypt).
+- pgAdmin: run ReelForge SQL only on "PostgreSQL 18" (local), never on SETU_Prod or other
+  work servers.
+- Keep Ollama open while models download, and keep the laptop plugged in during renders.
+- RAM is the main limit: close Chrome tabs during long renders if the laptop slows down.
+- Instagram reference reels often refuse anonymous download. Use "Upload the video instead"
+  in Reference Library, or put a cookies.txt from YOUR browser in reference-service\.env
+  (YTDLP_COOKIES_FILE). Never share that file.
+
+
+5. BACKUP & RESTORE
+-------------------
+
+Backup (database dump + media mirror to D:\reelforge-backups):
+    powershell -ExecutionPolicy Bypass -File scripts\backup.ps1
+Restore (stop the backend first; asks you to type RESTORE):
+    powershell -ExecutionPolicy Bypass -File scripts\restore.ps1 -Dump D:\reelforge-backups\db\<file>.dump
+Tip: schedule backup.ps1 daily in Windows Task Scheduler.
+
+
+6. COMMON PROBLEMS
+------------------
+
+Problem                                   Fix
+----------------------------------------  -----------------------------------------------
+"Backend not reachable" in the browser    Start the backend window (or start-all.ps1)
+redis ECONNREFUSED 127.0.0.1:6379         Start Redis
+llm: missing models                       ollama pull qwen2.5:7b-instruct ; ollama pull qwen2.5vl:3b
+media / ComfyUI "unreachable"             Start ComfyUI and media-service
+Reference "needs upload"                  Instagram blocked the download: upload the video file
+Publishing "needs attention"              Connect YouTube/Instagram in Settings -> Social accounts,
+                                          or download the video, post manually, "Mark published"
+Editor shows errors in old files          Close tabs of deleted files (server\, web\,
+                                          backend\src\routes\) and "Developer: Reload Window"
+
+
+7. LOCATIONS
+------------
+
+Project ............ D:\reel-creator-automation
+Settings ........... backend\.env  (+ reference-service\.env, media-service\.env)
+Plan & phases ...... docs\IMPLEMENTATION_PLAN.md
+Generated media .... D:\reel-creator-automation\storage
+AI models .......... D:\ai-models  (ollama, ComfyUI\models, hf)
+Redis .............. D:\tools\redis   (data: D:\tools\redis-data)
+Backups ............ D:\reelforge-backups

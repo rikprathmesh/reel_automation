@@ -1,0 +1,14 @@
+{
+  "_comment": "Stable Video Diffusion image-to-video using core ComfyUI nodes; frames are saved as PNGs and assembled by ffmpeg.",
+  "1": { "class_type": "ImageOnlyCheckpointLoader", "inputs": { "ckpt_name": "{{SVD_CHECKPOINT}}" } },
+  "2": { "class_type": "LoadImage", "inputs": { "image": "{{INPUT_IMAGE}}" } },
+  "3": { "class_type": "SVD_img2vid_Conditioning", "inputs": {
+    "clip_vision": ["1", 1], "init_image": ["2", 0], "vae": ["1", 2],
+    "width": "{{WIDTH}}", "height": "{{HEIGHT}}", "video_frames": "{{FRAMES}}", "motion_bucket_id": 110, "fps": "{{FPS}}", "augmentation_level": 0.0 } },
+  "4": { "class_type": "VideoLinearCFGGuidance", "inputs": { "model": ["1", 0], "min_cfg": 1.0 } },
+  "5": { "class_type": "KSampler", "inputs": {
+    "seed": "{{SEED}}", "steps": 20, "cfg": 2.5, "sampler_name": "euler", "scheduler": "karras", "denoise": 1.0,
+    "model": ["4", 0], "positive": ["3", 0], "negative": ["3", 1], "latent_image": ["3", 2] } },
+  "6": { "class_type": "VAEDecode", "inputs": { "samples": ["5", 0], "vae": ["1", 2] } },
+  "7": { "class_type": "SaveImage", "inputs": { "filename_prefix": "{{PREFIX}}", "images": ["6", 0] } }
+}
