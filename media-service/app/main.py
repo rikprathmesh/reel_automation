@@ -117,6 +117,12 @@ def animate_scene(req: AnimateRequest) -> dict:
     return guarded("animate", lambda: animate.animate(req.image_key, req.duration, req.camera, req.prompt, req.mode, req.out_key))
 
 
+@app.post("/free")
+def free() -> dict:
+    """Releases ComfyUI's models so the LLM can use the RAM."""
+    return {"comfyui_freed": comfyui.free_memory()}
+
+
 @app.post("/library/pick", response_model=LibraryResponse)
 def library_pick(req: LibraryRequest) -> dict:
     try:

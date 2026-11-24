@@ -101,10 +101,18 @@ def run_workflow(graph: dict) -> list[bytes]:
             r.raise_for_status()
             prompt_id = r.json()["prompt_id"]
             deadline = time.monotonic() + s.comfyui_timeout_sec
+            missing = 0
             while True:
                 h = c.get(f"/history/{prompt_id}")
                 h.raise_for_status()
                 entry = h.json().get(prompt_id)
+                if not entry:
+                    # ComfyUI restarted/crashed → the prompt is neither queued, running nor finished: fail fast
+                    q = c.get("/queue").json()
+                    queued = {item[1] for key in ("queue_running", "queue_pending") for item in q.get(key, []) if len(item) > 1}
+                    missing = 0 if prompt_id in queued else missing + 1
+                    if missing >= 3:
+                        raise ComfyUnavailable("ComfyUI lost the job (it crashed or restarted, usually from running out of memory)")
                 if entry:
                     st = entry.get("status", {})
                     if st.get("status_str") == "error":
@@ -128,3 +136,13 @@ def run_workflow(graph: dict) -> list[bytes]:
     if not images:
         raise ComfyFailed("ComfyUI finished without producing an image")
     return images
+
+
+def free_memory() -> bool:
+    """Asks ComfyUI to unload its models (call before running the LLM on a RAM-limited machine)."""
+    try:
+        with _client() as c:
+            r = c.post("/free", json={"unload_models": True, "free_memory": True}, timeout=30)
+            return r.status_code == 200
+    except httpx.HTTPError:
+        return False

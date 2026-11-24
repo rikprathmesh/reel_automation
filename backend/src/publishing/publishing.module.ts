@@ -43,7 +43,7 @@ export class PublishingService implements OnApplicationBootstrap {
     const base = config.get("PUBLIC_BASE_URL", { infer: true }).replace(/\/$/, "");
     this.key = config.get("TOKEN_ENCRYPTION_KEY", { infer: true });
     this.youtube = new YouTubeClient(config.get("GOOGLE_CLIENT_ID", { infer: true }), config.get("GOOGLE_CLIENT_SECRET", { infer: true }), `${base}/api/oauth/youtube/callback`);
-    this.instagram = new InstagramClient(config.get("META_APP_ID", { infer: true }), config.get("META_APP_SECRET", { infer: true }), config.get("IG_GRAPH_VERSION", { infer: true }), `${base}/api/oauth/instagram/callback`);
+    this.instagram = new InstagramClient(config.get("META_APP_ID", { infer: true }), config.get("META_APP_SECRET", { infer: true }), config.get("IG_GRAPH_VERSION", { infer: true }), `${config.get("FRONTEND_URL", { infer: true }).replace(/\/$/, "")}/settings/instagram-callback`);
   }
 
   onApplicationBootstrap() {
@@ -229,6 +229,7 @@ export class PublishingService implements OnApplicationBootstrap {
 }
 
 const ManualBody = z.object({ url: z.string().url(), remoteId: z.string().max(200).optional() });
+const IgLoginBody = z.object({ longLivedToken: z.string().min(20).max(4000), state: z.string().regex(/^[0-9a-f]{32}$/) });
 const IgTokenBody = z.object({ accessToken: z.string().min(20).max(2000), igUserId: z.string().regex(/^\d+$/).optional() });
 
 @Controller()
@@ -281,17 +282,17 @@ class PublishingController {
     res.redirect(this.svc.instagram.authUrl(this.svc.newState("instagram")));
   }
 
-  @Get("oauth/instagram/callback")
+  /**
+   * Business Login completion. Meta put the tokens in the URL fragment of the frontend callback page;
+   * that page posts the long-lived token here. The state check prevents login CSRF.
+   */
+  @Post("publishing/accounts/instagram/login")
   @Roles("owner")
-  async igCallback(@Query("code") code: string | undefined, @Query("state") state: string | undefined, @Query("error_description") error: string | undefined, @CurrentUser() u: SessionUser, @Res() res: Response) {
-    const back = (err?: string) => res.redirect(`${this.config.get("FRONTEND_URL", { infer: true })}/settings?tab=social&connected=instagram${err ? `&error=${encodeURIComponent(err)}` : ""}`);
-    if (!this.svc.consumeState(state, "instagram")) return back("Invalid or expired OAuth state");
-    if (error || !code) return back(error ?? "No authorization code");
-    try {
-      const r = await this.svc.instagram.exchangeCode(code);
-      await this.svc.saveAccount("instagram", r.credentials.igUserId, r.username, r.credentials, ["instagram_content_publish"], r.expiresAt, u.id);
-      back();
-    } catch (e) { back(e instanceof Error ? e.message : String(e)); }
+  async igLogin(@Body(zod(IgLoginBody)) b: z.infer<typeof IgLoginBody>, @CurrentUser() u: SessionUser) {
+    if (!this.svc.consumeState(b.state, "instagram")) throw new BadRequestException("Login session expired or invalid. Click Connect again.");
+    const r = await this.svc.instagram.connectFromLogin(b.longLivedToken.trim());
+    await this.svc.saveAccount("instagram", r.credentials.igUserId, r.username, r.credentials, ["instagram_basic", "instagram_content_publish", "pages_read_engagement"], r.expiresAt, u.id);
+    return { ok: true, username: r.username };
   }
 
   @Post("publishing/accounts/instagram/token")

@@ -119,3 +119,17 @@ test("duplicate detection: near-identical concepts score high, different ones lo
   assert.ok(similarity(a, b) > 0.45);
   assert.ok(similarity(a, c) < 0.2);
 });
+
+import { InstagramClient } from "../src/publishing/instagram.client.ts";
+
+test("instagram business login URL matches Meta's documented parameters", () => {
+  const c = new InstagramClient("1577113481127120", "secret", "v27.0", "http://localhost:3000/settings/instagram-callback");
+  const u = new URL(c.authUrl("0123456789abcdef0123456789abcdef"));
+  assert.equal(u.origin + u.pathname, "https://www.facebook.com/v27.0/dialog/oauth");
+  assert.equal(u.searchParams.get("display"), "page");
+  assert.equal(u.searchParams.get("response_type"), "token");
+  assert.deepEqual(JSON.parse(u.searchParams.get("extras")!), { setup: { channel: "IG_API_ONBOARDING" } });
+  assert.equal(u.searchParams.get("redirect_uri"), "http://localhost:3000/settings/instagram-callback");
+  for (const s of ["instagram_basic", "instagram_content_publish", "pages_read_engagement", "pages_show_list"]) assert.ok(u.searchParams.get("scope")!.split(",").includes(s), s);
+  assert.equal(u.searchParams.get("state"), "0123456789abcdef0123456789abcdef");
+});

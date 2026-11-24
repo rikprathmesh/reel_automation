@@ -176,7 +176,7 @@ function SocialTab() {
             <>
               {ig.oauthConfigured && <a href="/api/oauth/instagram/start"><Button>Connect with Facebook Login</Button></a>}
               <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-muted-foreground">
-                <b className="text-amber-300">Setup required.</b> Create a Meta app (developers.facebook.com) with the Instagram Graph API and the permissions <code>instagram_basic</code>, <code>instagram_content_publish</code> and <code>pages_show_list</code>. Either set <code>META_APP_ID</code> and <code>META_APP_SECRET</code> in <code>backend/.env</code> (redirect URI <code>http://localhost:3000/api/oauth/instagram/callback</code>), or paste a user access token below.
+                <b className="text-amber-300">Setup required.</b> Create a Meta app (developers.facebook.com) with the Instagram Graph API and the permissions <code>instagram_basic</code>, <code>instagram_content_publish</code> and <code>pages_show_list</code>. Either set <code>META_APP_ID</code> and <code>META_APP_SECRET</code> in <code>backend/.env</code> (Facebook Login for Business → Settings → Valid OAuth Redirect URI <code>http://localhost:3000/settings/instagram-callback</code>), or paste a user access token below.
               </div>
               <Input type="password" placeholder="Instagram Graph API access token" value={token} onChange={(e) => setToken(e.target.value)} />
               <Input placeholder="Instagram user ID (optional, auto-detected)" value={igUser} onChange={(e) => setIgUser(e.target.value)} />

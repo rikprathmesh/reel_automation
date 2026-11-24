@@ -66,6 +66,7 @@ export class StoryEngine implements OnApplicationBootstrap {
       return `Reference (${r.category ?? "uncategorized"}): hook ${JSON.stringify(a.hook)}; structure ${JSON.stringify(a.structure)}; pacing ${JSON.stringify(a.pacing)}; arc: ${a.emotionalArc}; retention: ${a.retentionTactics.join(", ")}. DO NOT COPY: ${a.doNotCopy.join("; ")}`;
     }).join("\n");
 
+    await this.registry.composer.freeImageModel();
     const llm = await this.registry.get("text");
     let feedbackNote = req.feedback ?? "";
     for (let attempt = 1; attempt <= 3; attempt++) {

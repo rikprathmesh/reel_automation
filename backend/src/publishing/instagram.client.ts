@@ -5,7 +5,9 @@
  */
 export interface IgCredentials { accessToken: string; igUserId: string }
 
-const SCOPES = ["instagram_basic", "instagram_content_publish", "instagram_manage_insights", "pages_show_list", "pages_read_engagement", "business_management"];
+// Per Meta docs (Instagram API with Facebook Login): publishing needs instagram_basic, instagram_content_publish, pages_read_engagement;
+// pages_show_list finds the linked Page; instagram_manage_insights powers analytics.
+const SCOPES = ["instagram_basic", "instagram_content_publish", "pages_read_engagement", "pages_show_list", "instagram_manage_insights"];
 
 async function j<T>(res: Response, what: string): Promise<T> {
   const text = await res.text();
@@ -28,8 +30,22 @@ export class InstagramClient {
     return Boolean(this.appId && this.appSecret);
   }
 
+  /**
+   * "Facebook Login for Business" login URL, exactly as documented for the Instagram API
+   * (business-login-for-instagram): display=page, extras IG_API_ONBOARDING, response_type=token.
+   * Meta returns the tokens in the URL *fragment* of redirect_uri, which only the browser can read;
+   * the frontend page at redirect_uri posts the long-lived token to the backend.
+   */
   authUrl(state: string) {
-    const q = new URLSearchParams({ client_id: this.appId, redirect_uri: this.redirectUri, state, scope: SCOPES.join(","), response_type: "code" });
+    const q = new URLSearchParams({
+      client_id: this.appId,
+      display: "page",
+      extras: JSON.stringify({ setup: { channel: "IG_API_ONBOARDING" } }),
+      redirect_uri: this.redirectUri,
+      response_type: "token",
+      scope: SCOPES.join(","),
+      state,
+    });
     return `https://www.facebook.com/${this.version}/dialog/oauth?${q}`;
   }
 
@@ -39,10 +55,20 @@ export class InstagramClient {
     return j<{ access_token: string; expires_in?: number }>(await fetch(`${this.graph}/oauth/access_token?${q}`), "token exchange");
   }
 
-  async exchangeCode(code: string) {
-    const q = new URLSearchParams({ client_id: this.appId, client_secret: this.appSecret, redirect_uri: this.redirectUri, code });
-    const short = await j<{ access_token: string }>(await fetch(`${this.graph}/oauth/access_token?${q}`), "code exchange");
-    return this.connect(short.access_token);
+  /**
+   * Completes Business Login: the browser hands over the long-lived user token from the URL fragment.
+   * The token is verified against THIS app (debug_token) before it is trusted.
+   */
+  async connectFromLogin(longLivedToken: string) {
+    if (this.oauthConfigured) {
+      const appToken = `${this.appId}|${this.appSecret}`;
+      const dbg = await j<{ data: { app_id?: string; is_valid?: boolean; expires_at?: number } }>(
+        await fetch(`${this.graph}/debug_token?input_token=${encodeURIComponent(longLivedToken)}&access_token=${encodeURIComponent(appToken)}`), "token check");
+      if (!dbg.data.is_valid || dbg.data.app_id !== this.appId) throw new Error("The returned token is not valid for this Meta app");
+      const r = await this.connect(longLivedToken);
+      return { ...r, expiresAt: dbg.data.expires_at ? new Date(dbg.data.expires_at * 1000) : new Date(Date.now() + 60 * 86400_000) };
+    }
+    return this.connect(longLivedToken);
   }
 
   /** Validates a token and finds the IG professional account behind the user's Facebook Pages. */
@@ -73,13 +99,14 @@ export class InstagramClient {
       headers: { Authorization: `OAuth ${c.accessToken}`, offset: "0", file_size: String(bytes.length), "Content-Type": "application/octet-stream" },
       body: new Uint8Array(bytes),
     }), "video upload");
+    // Meta recommends checking container status about once a minute
     const deadline = Date.now() + 20 * 60_000;
     for (;;) {
       const st = await j<{ status_code?: string; status?: string }>(await fetch(`${this.graph}/${create.id}?fields=status_code,status&access_token=${encodeURIComponent(c.accessToken)}`), "status check");
       if (st.status_code === "FINISHED") break;
       if (st.status_code === "ERROR" || st.status_code === "EXPIRED") throw new Error(`Instagram processing failed: ${st.status ?? st.status_code}`);
       if (Date.now() > deadline) throw new Error("Instagram processing timed out");
-      await new Promise((r) => setTimeout(r, 8000));
+      await new Promise((r) => setTimeout(r, 30_000));
     }
     const pub = await j<{ id: string }>(await fetch(`${this.graph}/${c.igUserId}/media_publish`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ creation_id: create.id, access_token: c.accessToken }),

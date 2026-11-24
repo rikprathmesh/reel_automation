@@ -122,6 +122,10 @@ export class MediaComposer {
   thumbnail(imageKey: string, text: string, outKey: string) {
     return this.media.call<{ key: string }>("/thumbnail", { image_key: imageKey, text, out_key: outKey });
   }
+  /** Unloads the image model before LLM work (16 GB machine: never hold both in RAM). Best effort. */
+  async freeImageModel() {
+    try { await this.media.call<{ comfyui_freed: boolean }>("/free", {}, 60_000); } catch { /* media-service down: nothing to free */ }
+  }
   pickLibrary(kind: "music" | "sfx", query: string, salt: string) {
     return this.media.call<{ key: string | null }>("/library/pick", { kind, query, salt }, 60_000);
   }

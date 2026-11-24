@@ -39,7 +39,7 @@ const Env = z.object({
   GOOGLE_CLIENT_SECRET: z.string().default(""),
   META_APP_ID: z.string().default(""),
   META_APP_SECRET: z.string().default(""),
-  IG_GRAPH_VERSION: z.string().default("v23.0"),
+  IG_GRAPH_VERSION: z.string().default("v27.0"),
 });
 
 export type AppEnv = z.infer<typeof Env>;
