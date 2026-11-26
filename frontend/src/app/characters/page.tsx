@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { ImagePlus, Mic, Pencil, Plus, Star, Trash2, UserRound } from "lucide-react";
-import { api, errMsg, upload, LANGUAGE_LABELS, type Character, type CharacterInput, type VoiceProfile } from "@/lib/api";
+import { api, errMsg, upload, CATEGORY_LABELS, EPIC_CATEGORIES, LANGUAGE_LABELS, type Character, type CharacterInput, type VoiceProfile } from "@/lib/api";
 import { qk, useApiMutation, useCharacters, useSaveCharacter, useVoiceProfiles, useAvailableVoices } from "@/lib/queries";
 import { PageHeader } from "@/components/page-header";
 import { NativeSelect } from "@/components/native-select";
@@ -20,8 +20,14 @@ import { Textarea } from "@/components/ui/textarea";
 
 const EMPTY: CharacterInput = {
   name: "", description: "", appearance: "", furColors: "", clothingColors: "", personality: "", basePrompt: "", negativePrompt: "",
-  expressionPresets: {}, isStoryteller: false, active: true, voiceProfileId: null,
+  expressionPresets: {}, isStoryteller: false, active: true, voiceProfileId: null, hindiVoiceProfileId: null, categories: [],
 };
+
+/** Which stories a character appears in: the general kids' cast, or one epic's own cast. */
+const CAST_GROUPS: { value: string; label: string }[] = [
+  { value: "", label: "Kids' stories (Rabbit & Squirrel world)" },
+  ...EPIC_CATEGORIES.map((c) => ({ value: c, label: CATEGORY_LABELS[c] ?? c })),
+];
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
@@ -39,6 +45,7 @@ function CharacterEditor({ character, voices, onClose }: { character: Character 
     clothingColors: character.clothingColors, personality: character.personality, basePrompt: character.basePrompt,
     negativePrompt: character.negativePrompt, expressionPresets: character.expressionPresets, isStoryteller: character.isStoryteller,
     active: character.active, voiceProfileId: character.voiceProfileId,
+    hindiVoiceProfileId: character.hindiVoiceProfileId ?? null, categories: character.categories ?? [],
   } : EMPTY);
   const [presets, setPresets] = useState(Object.entries(character?.expressionPresets ?? {}).map(([k, v]) => `${k}: ${v}`).join("\n"));
   const save = useSaveCharacter();
@@ -67,6 +74,17 @@ function CharacterEditor({ character, voices, onClose }: { character: Character 
             <NativeSelect value={form.voiceProfileId ?? ""} onChange={(e) => set("voiceProfileId", e.target.value || null)}>
               <option value="">— none —</option>
               {voices.map((v) => <option key={v.id} value={v.id}>{v.name} ({v.engine}: {v.voiceId})</option>)}
+            </NativeSelect>
+          </Field>
+          <Field label="Used in" hint="Epic stories only use their own cast.">
+            <NativeSelect value={form.categories[0] ?? ""} onChange={(e) => set("categories", e.target.value ? [e.target.value] : [])}>
+              {CAST_GROUPS.map((g) => <option key={g.value} value={g.value}>{g.label}</option>)}
+            </NativeSelect>
+          </Field>
+          <Field label="Hindi voice" hint="Used when the story is in Hindi.">
+            <NativeSelect value={form.hindiVoiceProfileId ?? ""} onChange={(e) => set("hindiVoiceProfileId", e.target.value || null)}>
+              <option value="">— Hindi narrator —</option>
+              {voices.filter((v) => v.language === "hi").map((v) => <option key={v.id} value={v.id}>{v.name} ({v.voiceId})</option>)}
             </NativeSelect>
           </Field>
           <div className="sm:col-span-2"><Field label="Description"><Textarea rows={2} value={form.description} onChange={(e) => set("description", e.target.value)} /></Field></div>
@@ -107,6 +125,7 @@ function CharacterCard({ c, onEdit, i }: { c: Character; onEdit: () => void; i: 
             : <div className="grid size-full place-items-center text-muted-foreground"><div className="flex flex-col items-center gap-2 text-xs"><UserRound className="size-10 opacity-50" />No reference image yet<span className="opacity-70">Upload one, or generate a model sheet in Phase 6</span></div></div>}
           <div className="absolute top-2 left-2 flex gap-1.5">
             {c.isStoryteller && <Badge>Storyteller</Badge>}
+            {c.categories?.map((k) => <Badge key={k} variant="secondary">{CATEGORY_LABELS[k] ?? k}</Badge>)}
             {!c.active && <Badge variant="secondary">Inactive</Badge>}
           </div>
         </div>
@@ -130,9 +149,9 @@ function CharacterCard({ c, onEdit, i }: { c: Character; onEdit: () => void; i: 
                   <img src={img.url} alt="" className="size-full object-cover" />
                   <div className="absolute inset-0 flex items-center justify-center gap-0.5 bg-black/60 opacity-0 transition group-hover:opacity-100">
                     {!img.isPrimary && <button aria-label="Set primary" className="p-1" onClick={() => act(() => api.post(`/characters/${c.id}/images/${img.id}/primary`), "Primary image set")}><Star className="size-3.5" /></button>}
-                    <button aria-label="Remove image" className="p-1 text-red-400" onClick={() => act(() => api.del(`/characters/${c.id}/images/${img.id}`), "Image removed")}><Trash2 className="size-3.5" /></button>
+                    <button aria-label="Remove image" className="p-1 text-red-600 dark:text-red-400" onClick={() => act(() => api.del(`/characters/${c.id}/images/${img.id}`), "Image removed")}><Trash2 className="size-3.5" /></button>
                   </div>
-                  {img.isPrimary && <Star className="absolute top-0.5 right-0.5 size-3 fill-amber-400 text-amber-400" />}
+                  {img.isPrimary && <Star className="absolute top-0.5 right-0.5 size-3 fill-amber-400 text-amber-700 dark:text-amber-400" />}
                 </div>
               ))}
             </div>
@@ -157,7 +176,7 @@ function VoiceProfiles({ voices }: { voices: VoiceProfile[] }) {
         <CardTitle className="flex items-center gap-2"><Mic className="size-4" /> Voice profiles</CardTitle>
         <CardDescription>
           Local Kokoro / Piper voices.{" "}
-          {available.isError ? <span className="text-amber-400">Installed voices can be listed once the media service runs (Phase 6).</span> : available.data ? `${available.data.length} voices installed.` : null}
+          {available.isError ? <span className="text-amber-700 dark:text-amber-400">Installed voices can be listed once the media service runs (Phase 6).</span> : available.data ? `${available.data.length} voices installed.` : null}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -186,7 +205,7 @@ export default function CharactersPage() {
     <>
       <PageHeader title="Character Studio" description="Your recurring cast. Consistent specs + reference images keep every scene on-model."
         actions={<Button onClick={() => setEditing("new")}><Plus /> New character</Button>} />
-      {chars.isError && <p className="text-sm text-red-400">{errMsg(chars.error)}</p>}
+      {chars.isError && <p className="text-sm text-red-600 dark:text-red-400">{errMsg(chars.error)}</p>}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {chars.isPending && Array.from({ length: 2 }, (_, i) => <Skeleton key={i} className="h-96" />)}
         {chars.data?.map((c, i) => <CharacterCard key={c.id} c={c} i={i} onEdit={() => setEditing(c)} />)}

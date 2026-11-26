@@ -12,11 +12,12 @@
     "dev": "nest start --watch",
     "start": "node --enable-source-maps dist/main.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "tsx --test test/unit.test.ts test/gate.test.ts",
+    "test": "tsx --test test/unit.test.ts test/gate.test.ts test/prompts.test.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
+    "db:seed:cast": "tsx --env-file=.env prisma/seed-cast.ts",
     "db:studio": "prisma studio"
   },
   "dependencies": {

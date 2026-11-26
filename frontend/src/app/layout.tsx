@@ -9,11 +9,13 @@ export const metadata: Metadata = {
   description: "Personal AI reel studio with human-approved publishing",
 };
 
-export const viewport: Viewport = { themeColor: "#14131c", colorScheme: "dark" };
+export const viewport: Viewport = {
+  themeColor: [{ media: "(prefers-color-scheme: light)", color: "#f8f9fa" }, { media: "(prefers-color-scheme: dark)", color: "#131920" }],
+};
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className="dark h-full antialiased">
+    <html lang="en" className="h-full antialiased" suppressHydrationWarning>
       <body className="min-h-full bg-background text-foreground">
         <Providers>
           <AppShell>{children}</AppShell>

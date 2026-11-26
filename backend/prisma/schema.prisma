@@ -45,12 +45,53 @@ enum StoryCategory {
   family
   funny_animals
   inspirational
+  mahabharat
+  ramayan
+  shivaji_maharaj
+  panchatantra
+  hanuman
+  krishna
+  historical
+  travel_exploration
+  educational
 }
 
 enum Language {
   en
   hi
   hinglish
+}
+
+enum AgeGroup {
+  age_1_3
+  age_4_6
+  age_7_10
+  general
+}
+
+/// where the story came from: AI-invented, the creator's idea, the creator's full text, or the next episode of a story
+enum StorySource {
+  generated
+  idea
+  full_story
+  continuation
+}
+
+enum PromptKind {
+  scene_video
+  character_reference
+}
+
+enum PromptOrigin {
+  ai
+  ai_improved
+  ai_shortened
+  ai_expanded
+  ai_instructed
+  manual
+  model_switch
+  template
+  restored
 }
 
 enum StoryStatus {
@@ -65,6 +106,11 @@ enum ReferenceImageKind {
   pose
   expression
   uploaded
+  front
+  side
+  back
+  three_quarter
+  closeup
 }
 
 enum VoiceEngine {
@@ -126,6 +172,13 @@ enum VersionStatus {
   rejected
   changes_requested
   superseded
+  failed
+}
+
+enum SceneJobStatus {
+  queued
+  active
+  completed
   failed
 }
 
@@ -244,7 +297,21 @@ model Story {
   /// normalized premise used to reject near-duplicate concepts
   conceptFingerprint String
   status             StoryStatus      @default(draft)
+  /// visual style preset id (src/common/styles.ts); one style per reel
+  style              String           @default("storybook")
+  /// requested reel length in seconds (60 / 120 / 180); null on stories made before lengths existed
+  targetDurationSec  Int?
   model              String?
+  ageGroup           AgeGroup         @default(age_4_6)
+  sourceMode         StorySource      @default(generated)
+  /// the creator's idea or full story text, kept verbatim (never rewritten by the AI)
+  sourceText         String?
+  /// story bible from the understanding engine: characters, locations, objects, chronological events, moral
+  understanding      Json?
+  parentStoryId      String?          @db.Uuid
+  parent             Story?           @relation("Episodes", fields: [parentStoryId], references: [id], onDelete: SetNull)
+  episodes           Story[]          @relation("Episodes")
+  episodeNo          Int              @default(1)
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
   deletedAt          DateTime?
@@ -292,9 +359,18 @@ model StoryScene {
   onScreenText String
   dialogue     Json
   durationHint Float
+  title        String                @default("")
+  location     String                @default("")
+  /// story-bible event numbers this scene shows (faithfulness check)
+  events       Int[]                 @default([])
+  /// clip made outside ReelForge (Google Flow / Veo) and uploaded for this scene; used instead of the local picture + voices
+  clipAssetId  String?               @db.Uuid
+  clipAsset    MediaAsset?           @relation("SceneClip", fields: [clipAssetId], references: [id], onDelete: SetNull)
   createdAt    DateTime              @default(now())
   updatedAt    DateTime              @updatedAt
   characters   StorySceneCharacter[]
+  prompts      GeneratedPrompt[]
+  sceneJobs    SceneGenerationJob[]
 
   @@unique([scriptId, index])
 }
@@ -326,12 +402,25 @@ model Character {
   isStoryteller     Boolean                   @default(false)
   active            Boolean                   @default(true)
   voiceProfileId    String?                   @db.Uuid
-  voiceProfile      VoiceProfile?             @relation(fields: [voiceProfileId], references: [id], onDelete: SetNull)
+  voiceProfile      VoiceProfile?             @relation("CharacterVoice", fields: [voiceProfileId], references: [id], onDelete: SetNull)
+  /// voice used when the story is in Hindi (Devanagari); falls back to voiceProfile if it is already Hindi
+  hindiVoiceProfileId String?                 @db.Uuid
+  hindiVoiceProfile VoiceProfile?             @relation("CharacterHindiVoice", fields: [hindiVoiceProfileId], references: [id], onDelete: SetNull)
+  /// story categories this character belongs to; empty = the general kids' cast (not used in epic stories)
+  categories        StoryCategory[]           @default([])
+  /// species / character type, e.g. "baby lion", "human boy"
+  species           String                    @default("")
+  /// permanent identity: proportions, face, eyes, surface, clothing, accessories, colours, expressions, motion style
+  visualProfile     Json?
+  /// model-ready identity tags restated in every scene prompt (derived from visualProfile)
+  identityPrompt    String                    @default("")
+  preferredModel    String?
   createdAt         DateTime                  @default(now())
   updatedAt         DateTime                  @updatedAt
   deletedAt         DateTime?
   referenceImages   CharacterReferenceImage[]
   scenes            StorySceneCharacter[]
+  prompts           GeneratedPrompt[]
 }
 
 model CharacterReferenceImage {
@@ -359,7 +448,8 @@ model VoiceProfile {
   isNarrator Boolean     @default(false)
   createdAt  DateTime    @default(now())
   updatedAt  DateTime    @updatedAt
-  characters Character[]
+  characters Character[] @relation("CharacterVoice")
+  hindiCharacters Character[] @relation("CharacterHindiVoice")
 }
 
 /* ============================== media ============================== */
@@ -385,6 +475,7 @@ model MediaAsset {
   references      ReferenceVideo[]          @relation("ReferenceVideoAsset")
   videoOf         VideoVersion[]            @relation("VersionVideo")
   thumbnailOf     VideoVersion[]            @relation("VersionThumbnail")
+  sceneClips      StoryScene[]              @relation("SceneClip")
 
   @@index([projectId, kind])
 }
@@ -446,8 +537,11 @@ model VideoVersion {
   validation       Json?
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
+  /// wall-clock timings of this render (scene jobs, merge, total), for measuring the pipeline
+  timings          Json?
   approvals        Approval[]
   publishingJobs   PublishingJob[]
+  sceneJobs        SceneGenerationJob[]
 
   @@unique([projectId, versionNo])
   @@index([status])
@@ -555,7 +649,9 @@ model DailySchedule {
   startTime      String          @default("01:00")
   timezone       String
   categories     StoryCategory[]
-  language       Language        @default(en)
+  language       Language        @default(hi)
+  /// reel length for scheduled reels, seconds (60 / 120 / 180)
+  targetDurationSec Int          @default(60)
   maxConcurrency Int             @default(1)
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
@@ -601,4 +697,91 @@ model ActivityLog {
 
   @@index([entityType, entityId])
   @@index([createdAt])
+}
+
+/* ============================== prompt engine ============================== */
+
+/// Versioned, structured prompts. One row per (scene | character+view, kind) has isCurrent=true.
+/// Prompt operations never modify the story: prompts live here, not in StoryScene.
+model GeneratedPrompt {
+  id          String       @id @default(uuid()) @db.Uuid
+  kind        PromptKind
+  sceneId     String?      @db.Uuid
+  scene       StoryScene?  @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+  characterId String?      @db.Uuid
+  character   Character?   @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  /// character reference view (front, side, back, three_quarter, closeup, expressions); empty for scenes
+  view        String       @default("")
+  /// model adapter id (src/prompts/adapters.ts)
+  targetModel String
+  version     Int
+  isCurrent   Boolean      @default(true)
+  origin      PromptOrigin
+  /// full structured spec (sections A-J)
+  spec        Json
+  positive    String
+  negative    String
+  /// instructions the target model cannot follow (shown to the creator, never sent as if supported)
+  dropped     String[]     @default([])
+  params      Json?
+  evaluation  Json?
+  score       Int?
+  /// the creator's instruction for ai_instructed / the template name for template
+  instruction String?
+  /// LLM that wrote it
+  model       String?
+  createdById String?      @db.Uuid
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([sceneId, kind, isCurrent])
+  @@index([characterId, kind, isCurrent])
+}
+
+/// Reusable craft (camera, look, lighting, negatives) saved from a prompt that worked; never story content.
+model PromptTemplate {
+  id             String     @id @default(uuid()) @db.Uuid
+  name           String     @unique
+  kind           PromptKind
+  targetModel    String
+  spec           Json
+  notes          String     @default("")
+  sourcePromptId String?    @db.Uuid
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  deletedAt      DateTime?
+}
+
+/// One scene of one render: an independent job (keyframe image, voices, optional AI clip). The version's merge job
+/// combines them. Completed scenes survive retries and restarts, and are reused when only one scene is regenerated.
+model SceneGenerationJob {
+  id            String         @id @default(uuid()) @db.Uuid
+  versionId     String         @db.Uuid
+  version       VideoVersion   @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  sceneId       String         @db.Uuid
+  scene         StoryScene     @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+  index         Int
+  status        SceneJobStatus @default(queued)
+  bullJobId     String?
+  attempt       Int            @default(0)
+  seed          Int
+  imageKey      String?
+  /// AI-generated clip for this scene; null when the scene is a still (Ken Burns is made at merge time)
+  clipKey       String?
+  /// [{ line, speaker, key, duration, words }]
+  voices        Json?
+  promptId      String?        @db.Uuid
+  promptVersion Int?
+  /// copied unchanged from an earlier version's scene (single-scene regeneration)
+  reusedFromId  String?        @db.Uuid
+  error         Json?
+  /// seconds per step: { image, voice, clip, total }
+  timings       Json?
+  startedAt     DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@unique([versionId, sceneId])
+  @@index([versionId, status])
 }

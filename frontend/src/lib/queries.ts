@@ -86,8 +86,8 @@ export function useLiveEvents(enabled: boolean) {
       es.addEventListener(type, () => keys.forEach((k) => void qc.invalidateQueries({ queryKey: k })));
     on("activity", [["activity"]]);
     on("reference", [qk.references]);
-    on("character", [qk.characters]);
-    on("story", [qk.stories, qk.stats]);
+    on("character", [qk.characters, ["prompts"]]);
+    on("story", [qk.stories, qk.stats, ["prompts"]]);
     on("project", [qk.projects, qk.stats, ["review"]]);
     on("job", [qk.jobs, qk.projects, qk.stats]);
     on("publishing", [qk.projects, qk.stats, qk.publishing, ["review"]]);

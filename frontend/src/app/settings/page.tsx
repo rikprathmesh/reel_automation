@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { CheckCircle2, CircleAlert, Cpu, KeyRound } from "lucide-react";
-import { api, errMsg, CATEGORY_LABELS, LANGUAGE_LABELS, type DailySchedule, type GenerationSettings } from "@/lib/api";
+import { api, errMsg, AGE_GROUP_LABELS, type AgeGroup, CATEGORY_LABELS, LANGUAGE_LABELS, STYLE_OPTIONS, LENGTH_OPTIONS, type LengthSec, type DailySchedule, type GenerationSettings } from "@/lib/api";
 import { qk, useAccounts, useApiMutation, useIntegrations, useSaveGeneration, useSaveSchedule, useSettings } from "@/lib/queries";
 import { PageHeader } from "@/components/page-header";
 import { NativeSelect } from "@/components/native-select";
@@ -36,12 +36,20 @@ function GenerationTab({ initial, output }: { initial: GenerationSettings; outpu
       <CardHeader><CardTitle>Generation defaults</CardTitle><CardDescription>Applied to every new story and reel.</CardDescription></CardHeader>
       <CardContent className="divide-y divide-border/60">
         <Row label="Language"><NativeSelect className="max-w-56" value={g.language} onChange={(e) => setG({ ...g, language: e.target.value as GenerationSettings["language"] })}>{Object.entries(LANGUAGE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</NativeSelect></Row>
-        <Row label="Target duration" hint="Seconds, between 15 and 90.">
-          <div className="flex max-w-56 items-center gap-2">
-            <Input type="number" min={15} max={90} value={g.minDurationSec} onChange={(e) => setG({ ...g, minDurationSec: Number(e.target.value) })} />
-            <span className="text-muted-foreground">to</span>
-            <Input type="number" min={15} max={90} value={g.maxDurationSec} onChange={(e) => setG({ ...g, maxDurationSec: Number(e.target.value) })} />
-          </div>
+        <Row label="Visual style" hint="Default for new reels and the daily schedule. Each reel uses one style.">
+          <NativeSelect className="max-w-56" value={g.style ?? "storybook"} onChange={(e) => setG({ ...g, style: e.target.value as GenerationSettings["style"] })}>{STYLE_OPTIONS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</NativeSelect>
+        </Row>
+        <Row label="Reel length" hint="Default for new reels. At least 1 minute; 3 min is the longest Shorts / Reels allow.">
+          <NativeSelect className="max-w-56" value={g.durationSec ?? 60} onChange={(e) => setG({ ...g, durationSec: Number(e.target.value) as LengthSec })}>{LENGTH_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</NativeSelect>
+        </Row>
+        <Row label="Audience" hint="Adapts vocabulary, narration pace and emotional depth.">
+          <NativeSelect className="max-w-56" value={g.ageGroup ?? "age_4_6"} onChange={(e) => setG({ ...g, ageGroup: e.target.value as AgeGroup })}>{Object.entries(AGE_GROUP_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</NativeSelect>
+        </Row>
+        <Row label="Scene length" hint="Target seconds per scene (one animated shot). A starting point: pacing, dialogue and the video model decide the final length.">
+          <NativeSelect className="max-w-56" value={g.sceneSec ?? 8} onChange={(e) => setG({ ...g, sceneSec: Number(e.target.value) })}>{[5, 6, 8, 10, 12, 15].map((n) => <option key={n} value={n}>{n} s</option>)}</NativeSelect>
+        </Row>
+        <Row label="Automatic scene prompts" hint="Write structured, story-aware prompts for every scene before production (adds ~2-4 min per scene on this CPU). Review them in Prompt Studio.">
+          <label className="flex items-center gap-2 text-sm"><Checkbox checked={g.autoPrompts ?? true} onCheckedChange={(v) => setG({ ...g, autoPrompts: Boolean(v) })} />Enabled</label>
         </Row>
         <Row label="Output format" hint="Fixed for YouTube Shorts + Instagram Reels.">
           <div className="text-sm">{output.width} × {output.height} ({output.aspect}) · {output.fps} fps · {output.videoCodec} / {output.audioCodec} · MP4</div>
@@ -83,6 +91,7 @@ function ScheduleTab({ initial }: { initial: DailySchedule }) {
         <Row label="Start time" hint="Runs overnight on this CPU-only laptop."><Input className="max-w-32" type="time" value={s.startTime} onChange={(e) => setS({ ...s, startTime: e.target.value })} /></Row>
         <Row label="Timezone"><Input className="max-w-56" value={s.timezone} onChange={(e) => setS({ ...s, timezone: e.target.value })} /></Row>
         <Row label="Language"><NativeSelect className="max-w-56" value={s.language} onChange={(e) => setS({ ...s, language: e.target.value as DailySchedule["language"] })}>{Object.entries(LANGUAGE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</NativeSelect></Row>
+        <Row label="Reel length"><NativeSelect className="max-w-56" value={s.targetDurationSec ?? 60} onChange={(e) => setS({ ...s, targetDurationSec: Number(e.target.value) as LengthSec })}>{LENGTH_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</NativeSelect></Row>
         <Row label="Parallel jobs" hint="1 recommended without a GPU."><NativeSelect className="max-w-24" value={s.maxConcurrency} onChange={(e) => setS({ ...s, maxConcurrency: Number(e.target.value) })}><option value={1}>1</option><option value={2}>2</option></NativeSelect></Row>
         <Row label="Categories" hint="Rotated through the day's batch.">
           <div className="grid gap-2 text-sm sm:grid-cols-2">
@@ -108,7 +117,7 @@ function ProvidersTab() {
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         {integ.isPending && <Skeleton className="h-40" />}
-        {integ.isError && <p className="text-sm text-red-400">{errMsg(integ.error)}</p>}
+        {integ.isError && <p className="text-sm text-red-600 dark:text-red-400">{errMsg(integ.error)}</p>}
         {integ.data?.map((c) => (
           <div key={c.capability} className="rounded-lg border border-border/60 p-3">
             <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{c.capability}</div>
@@ -123,7 +132,7 @@ function ProvidersTab() {
                     }} />
                   <div className="min-w-0 flex-1 text-sm">
                     <div className="flex flex-wrap items-center gap-2">{o.label}{o.local && <Badge variant="secondary">local</Badge>}{o.paid && <Badge variant="destructive">paid</Badge>}</div>
-                    <div className={`flex items-center gap-1 text-xs ${o.health.ok ? "text-emerald-400" : "text-amber-400"}`}>
+                    <div className={`flex items-center gap-1 text-xs ${o.health.ok ? "text-emerald-600 dark:text-emerald-400" : "text-amber-700 dark:text-amber-400"}`}>
                       {o.health.ok ? <CheckCircle2 className="size-3" /> : <CircleAlert className="size-3" />}{o.health.detail}
                     </div>
                   </div>
@@ -159,7 +168,7 @@ function SocialTab() {
             <a href="/api/oauth/youtube/start"><Button>Connect YouTube</Button></a>
           ) : (
             <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-muted-foreground">
-              <b className="text-amber-300">Setup required.</b> In Google Cloud Console: create a project, enable <i>YouTube Data API v3</i>, configure the OAuth consent screen (External, add yourself as a test user), then create an OAuth client ID of type <i>Web application</i> with redirect URI <code>http://localhost:3000/api/oauth/youtube/callback</code>. Put <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code> in <code>backend/.env</code> and restart the backend.
+              <b className="text-amber-700 dark:text-amber-300">Setup required.</b> In Google Cloud Console: create a project, enable <i>YouTube Data API v3</i>, configure the OAuth consent screen (External, add yourself as a test user), then create an OAuth client ID of type <i>Web application</i> with redirect URI <code>http://localhost:3000/api/oauth/youtube/callback</code>. Put <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code> in <code>backend/.env</code> and restart the backend.
             </div>
           )}
         </CardContent>
@@ -176,7 +185,7 @@ function SocialTab() {
             <>
               {ig.oauthConfigured && <a href="/api/oauth/instagram/start"><Button>Connect with Facebook Login</Button></a>}
               <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-muted-foreground">
-                <b className="text-amber-300">Setup required.</b> Create a Meta app (developers.facebook.com) with the Instagram Graph API and the permissions <code>instagram_basic</code>, <code>instagram_content_publish</code> and <code>pages_show_list</code>. Either set <code>META_APP_ID</code> and <code>META_APP_SECRET</code> in <code>backend/.env</code> (Facebook Login for Business → Settings → Valid OAuth Redirect URI <code>http://localhost:3000/settings/instagram-callback</code>), or paste a user access token below.
+                <b className="text-amber-700 dark:text-amber-300">Setup required.</b> Create a Meta app (developers.facebook.com) with the Instagram Graph API and the permissions <code>instagram_basic</code>, <code>instagram_content_publish</code> and <code>pages_show_list</code>. Either set <code>META_APP_ID</code> and <code>META_APP_SECRET</code> in <code>backend/.env</code> (Facebook Login for Business → Settings → Valid OAuth Redirect URI <code>http://localhost:3000/settings/instagram-callback</code>), or paste a user access token below.
               </div>
               <Input type="password" placeholder="Instagram Graph API access token" value={token} onChange={(e) => setToken(e.target.value)} />
               <Input placeholder="Instagram user ID (optional, auto-detected)" value={igUser} onChange={(e) => setIgUser(e.target.value)} />
@@ -225,7 +234,7 @@ export default function SettingsPage() {
   return (
     <>
       <PageHeader title="Settings" description="Generation defaults, automation, AI providers and accounts." />
-      {settings.isError && <p className="text-sm text-red-400">{errMsg(settings.error)}</p>}
+      {settings.isError && <p className="text-sm text-red-600 dark:text-red-400">{errMsg(settings.error)}</p>}
       <Tabs value={tab} onValueChange={(v) => setTab(String(v))}>
         <TabsList className="mb-4 flex-wrap">
           <TabsTrigger value="generation">Generation</TabsTrigger>

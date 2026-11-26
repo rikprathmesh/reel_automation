@@ -104,16 +104,24 @@ def join_scenes(scenes: list[TimelineScene], out: Path) -> None:
     if len(scenes) == 1:
         shutil.copyfile(clips[0], out)
         return
+    s = get_settings()
+    W, H = s.video_width, s.video_height
     inputs: list[str] = []
     for c in clips:
         inputs += ["-i", str(c)]
-    parts: list[str] = []
-    prev = "[0:v]"
+    # every input is brought to the same size, rate, pixel format and timebase first: uploaded clips (Google Flow
+    # 720p/1080p, any aspect) differ from the 1080x1920 scenes made here, and xfade requires identical inputs
+    parts: list[str] = [
+        f"[{i}:v]scale={W}:{H}:force_original_aspect_ratio=increase:flags=lanczos,crop={W}:{H},fps={fps},setsar=1,format=yuv420p,"
+        f"trim=duration={sc.duration:.3f},setpts=PTS-STARTPTS,settb=AVTB[n{i}]"
+        for i, sc in enumerate(scenes)
+    ]
+    prev = "[n0]"
     for k in range(1, len(scenes)):
         t = scenes[k - 1]
         label = "[vout]" if k == len(scenes) - 1 else f"[v{k}]"
         trans_sec = max(0.04, t.transition_sec)
-        parts.append(f"{prev}[{k}:v]xfade=transition={t.transition}:duration={trans_sec:.3f}:offset={scenes[k].start:.3f}{label}")
+        parts.append(f"{prev}[n{k}]xfade=transition={t.transition}:duration={trans_sec:.3f}:offset={scenes[k].start:.3f}{label}")
         prev = label
     run_ffmpeg([*inputs, "-filter_complex", ";".join(parts), "-map", "[vout]", "-r", str(fps), "-c:v", "libx264", "-preset", "veryfast", "-crf", "17", "-pix_fmt", "yuv420p", str(out)])
 

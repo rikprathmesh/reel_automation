@@ -21,7 +21,7 @@ const LANES: { key: string; title: string; statuses: string[] }[] = [
   { key: "cancelled", title: "Cancelled", statuses: ["cancelled"] },
 ];
 const STYLE: Record<string, string> = {
-  scheduled: "text-violet-300", queued: "text-sky-300", uploading: "text-sky-300", published: "text-emerald-300", failed: "text-red-300", manual_required: "text-amber-300", cancelled: "text-muted-foreground",
+  scheduled: "text-violet-600 dark:text-violet-300", queued: "text-sky-600 dark:text-sky-300", uploading: "text-sky-600 dark:text-sky-300", published: "text-emerald-600 dark:text-emerald-300", failed: "text-red-600 dark:text-red-300", manual_required: "text-amber-700 dark:text-amber-300", cancelled: "text-muted-foreground",
 };
 
 function errorText(e: Record<string, unknown> | null) {
@@ -42,7 +42,7 @@ function JobRow({ j, onManual }: { j: PublishingJobRow; onManual: () => void }) 
           {j.scheduledFor && ` · scheduled ${new Date(j.scheduledFor).toLocaleString()}`}
           {j.published && ` · published ${new Date(j.published.publishedAt).toLocaleString()}`}
         </div>
-        {errorText(j.lastError) && j.status !== "published" && <p className="mt-1 text-xs text-red-300">{errorText(j.lastError)}</p>}
+        {errorText(j.lastError) && j.status !== "published" && <p className="mt-1 text-xs text-red-600 dark:text-red-300">{errorText(j.lastError)}</p>}
         {stats && <p className="mt-1 text-xs text-muted-foreground">{fmtNum(stats.views)} views · {fmtNum(stats.likes)} likes · {fmtNum(stats.comments)} comments</p>}
       </div>
       <div className="flex shrink-0 flex-col gap-1">
@@ -64,7 +64,7 @@ export default function PublishingPage() {
   return (
     <>
       <PageHeader title="Publishing Center" description="Only approved reels appear here. Every upload re-verifies the approval in the database first." />
-      {jobs.isError && <p className="text-sm text-red-400">{errMsg(jobs.error)}</p>}
+      {jobs.isError && <p className="text-sm text-red-600 dark:text-red-400">{errMsg(jobs.error)}</p>}
       {upcoming.length > 0 && (
         <Card className="mb-5">
           <CardHeader><CardTitle className="flex items-center gap-2"><CalendarDays className="size-4" /> Publishing calendar</CardTitle></CardHeader>

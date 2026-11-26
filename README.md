@@ -50,6 +50,16 @@ Every AI capability sits behind a provider interface (`TextGenerationProvider`, 
 | 8. Publishing | ✅ Code complete: YouTube Data API v3 (OAuth) and Instagram Graph API (Reels, resumable upload), scheduling, duplicate-safe retries, manual-publish fallback, analytics. **Needs your Google Cloud and Meta app credentials to go live** |
 | 9. Testing & deployment | ✅ 21 unit tests (12 cover the approval gate), API integration runs, e2e browser smoke test, Dockerfiles + compose, tested backup |
 
+### Video engine upgrade (2026-11-26, see [docs/AUDIT_VIDEO_ENGINE.md](docs/AUDIT_VIDEO_ENGINE.md))
+
+| Phase | Status |
+|---|---|
+| 1. Audit | ✅ Root causes: stills + Ken Burns (no video model), one-line prompts, merged character references, no story understanding |
+| 2. Story & prompt engine | ✅ Story sources (AI / my idea / my full story / next episode), age groups, 6 new categories, **story bible** (characters, locations, objects, chronological events), faithfulness checks, permanent character profiles + 6 reference-view prompts, structured scene prompts (sections A–J) written per scene with whole-story context, model adapters that declare what each model can and cannot do, quality rubric + automatic improvement, **Prompt Studio** (view, edit, regenerate, improve, shorten, expand, instruct, switch model, history/restore, templates) |
+| Async pipeline | ✅ Each reel fans out into independent **scene jobs** (keyframe image → voices → AI clip when a video model is selected), stored in `SceneGenerationJob`; a **merge job** runs when all are done (timing, camera motion, music, render, validation). Retries, crashes and restarts resume from finished scenes. **Regenerate one scene** in Review Studio → Scenes (new version, other scenes reused). Every version records its timings (per scene, merge, wall clock). AI-story mode now invents its own premise and designs new characters; character designs self-check against the story's details |
+| 3. Character consistency (multi-view references, one IP-Adapter per character) | Next |
+| 4. Real AI animation (AnimateDiff/AnimateLCM on CPU, or Wan/LTX on a GPU) | Needs your decision: ~2 GB download + licence check |
+
 ## Non-negotiable rules (how they are enforced)
 
 | Rule | Enforcement |
@@ -74,7 +84,7 @@ cd frontend; $env:E2E_EMAIL="…"; $env:E2E_PASSWORD="…"; npm run test:e2e   #
 
 ## Known limits on this laptop (honest)
 
-- **No real character animation.** There's no NVIDIA GPU, so motion is cinematic camera movement over still frames. Real image-to-video needs a CUDA GPU (the `comfyui-img2vid` provider is ready).
+- **No real character animation yet.** There's no NVIDIA GPU, so today motion is camera movement over still frames, and every such reel is labelled "Not AI-animated" in Review. The only real-animation model that can run on this CPU is AnimateDiff/AnimateLCM (estimated 15–30 min per 2 s clip). Wan 2.1, LTX-Video and SVD need an NVIDIA GPU. Prompt Studio → Models shows what can actually run (workflow, nodes and model files all present).
 - **Speed.** Measured: ~5–6 min per image when the machine isn't swapping, ~10 min per story. One reel takes about an hour, so five per day means an overnight batch. Close other heavy apps while rendering.
 - **Instagram references.** Agent Reach 1.6.1's Instagram channel can't read single reels, so the pipeline uses yt-dlp, which Instagram often blocks without login. Upload the video, or provide your own browser cookies.
 - **Publishing.** This needs your Google Cloud OAuth client (YouTube) and a Meta app plus an Instagram Professional account. Until then, approved reels can be published manually and recorded.

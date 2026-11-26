@@ -1,0 +1,22 @@
+{
+  "_comment": "Real AI animation on CPU: SD1.5 (DreamShaper) + LCM-LoRA + IP-Adapter (character reference) + AnimateDiff v3 motion module (ComfyUI-AnimateDiff-Evolved, Apache-2.0). Image-to-video by latent init: the scene keyframe is encoded, repeated for every frame and partially re-noised (DENOISE), so the composition and characters stay while AnimateDiff adds motion directed by the prompt. Frames are saved as PNGs and assembled by app/animate.py.",
+  "4": { "class_type": "CheckpointLoaderSimple", "inputs": { "ckpt_name": "{{CHECKPOINT}}" } },
+  "13": { "class_type": "LoraLoader", "inputs": { "lora_name": "{{LCM_LORA}}", "strength_model": 1.0, "strength_clip": 1.0, "model": ["4", 0], "clip": ["4", 1] } },
+  "10": { "class_type": "LoadImage", "inputs": { "image": "{{REF_IMAGE}}" } },
+  "11": { "class_type": "IPAdapterUnifiedLoader", "inputs": { "preset": "PLUS (high strength)", "model": ["13", 0] } },
+  "12": { "class_type": "IPAdapterAdvanced", "inputs": {
+    "model": ["11", 0], "ipadapter": ["11", 1], "image": ["10", 0],
+    "weight": "{{REF_WEIGHT}}", "weight_type": "linear", "combine_embeds": "concat", "start_at": 0.0, "end_at": 1.0, "embeds_scaling": "V only" } },
+  "30": { "class_type": "ADE_AnimateDiffLoaderGen1", "inputs": { "model": ["12", 0], "model_name": "{{MOTION_MODEL}}", "beta_schedule": "lcm >> sqrt_linear" } },
+  "20": { "class_type": "LoadImage", "inputs": { "image": "{{INPUT_IMAGE}}" } },
+  "21": { "class_type": "ImageScale", "inputs": { "image": ["20", 0], "upscale_method": "lanczos", "width": "{{WIDTH}}", "height": "{{HEIGHT}}", "crop": "center" } },
+  "22": { "class_type": "VAEEncode", "inputs": { "pixels": ["21", 0], "vae": ["4", 2] } },
+  "23": { "class_type": "RepeatLatentBatch", "inputs": { "samples": ["22", 0], "amount": "{{FRAMES}}" } },
+  "6": { "class_type": "CLIPTextEncode", "inputs": { "text": "{{PROMPT}}", "clip": ["13", 1] } },
+  "7": { "class_type": "CLIPTextEncode", "inputs": { "text": "{{NEGATIVE}}", "clip": ["13", 1] } },
+  "3": { "class_type": "KSampler", "inputs": {
+    "seed": "{{SEED}}", "steps": "{{STEPS}}", "cfg": "{{CFG}}", "sampler_name": "lcm", "scheduler": "sgm_uniform", "denoise": "{{DENOISE}}",
+    "model": ["30", 0], "positive": ["6", 0], "negative": ["7", 0], "latent_image": ["23", 0] } },
+  "8": { "class_type": "VAEDecode", "inputs": { "samples": ["3", 0], "vae": ["4", 2] } },
+  "9": { "class_type": "SaveImage", "inputs": { "filename_prefix": "{{PREFIX}}", "images": ["8", 0] } }
+}

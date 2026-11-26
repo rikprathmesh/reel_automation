@@ -26,6 +26,7 @@ const Env = z.object({
   MAX_UPLOAD_MB: z.coerce.number().int().positive().default(300),
 
   MEDIA_SERVICE_URL: z.string().url().default("http://127.0.0.1:8000"),
+  COMFYUI_URL: z.string().url().default("http://127.0.0.1:8188"),
   REFERENCE_SERVICE_URL: z.string().url().default("http://127.0.0.1:8100"),
   SERVICE_TOKEN: z.string().default(""),
 

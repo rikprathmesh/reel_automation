@@ -70,3 +70,16 @@ test("detectPlatform identifies platforms by exact host, not substring tricks", 
   assert.equal(detectPlatform("https://instagram.com.evil.example/reel/x"), "web");
   assert.equal(detectPlatform("not a url"), "unknown");
 });
+
+test("storyPlan: reels are at least a minute and scale scenes/tokens with length", async () => {
+  const { storyPlan, normalizeLength } = await import("../src/common/lengths.ts");
+  assert.equal(storyPlan(30).targetSec, 60);
+  assert.equal(storyPlan(undefined).targetSec, 60);
+  assert.equal(storyPlan(999).targetSec, 180);
+  const short = storyPlan(60), long = storyPlan(180);
+  assert.ok(long.minScenes > short.minScenes && long.words > short.words && long.maxTokens > short.maxTokens);
+  assert.ok(long.maxTokens + 4096 <= 16384, "long reels must fit the Ollama context cap");
+  assert.equal(normalizeLength(90), 60);
+  assert.equal(normalizeLength(100), 120);
+  assert.equal(normalizeLength(170), 180);
+});

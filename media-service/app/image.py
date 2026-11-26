@@ -13,11 +13,16 @@ from .storage import ensure_parent, existing, key_for
 DEFAULT_NEGATIVE = "text, letters, watermark, logo, signature, blurry, deformed, extra limbs, bad anatomy, lowres, jpeg artifacts"
 
 
-def generate(prompt: str, negative: str | None, reference_keys: list[str], seed: int, width: int, height: int, out_key: str) -> dict:
+def generate(prompt: str, negative: str | None, reference_keys: list[str], seed: int, width: int, height: int, out_key: str,
+             ref_weight: float | None = None) -> dict:
     s = get_settings()
+    weight = s.comfyui_ref_weight if ref_weight is None else ref_weight
     refs = [existing(k) for k in reference_keys]
-    use_ref = bool(refs) and "txt2img_ref" in comfyui.available_workflows()
-    workflow = "txt2img_ref" if use_ref else "txt2img"
+    available = comfyui.available_workflows()
+    use_ref = bool(refs) and weight > 0 and "txt2img_ref" in available
+    # two characters: each gets its own reference on its own half of the frame (no merged hybrid)
+    regional = use_ref and len(refs) >= 2 and "txt2img_regional" in available
+    workflow = "txt2img_regional" if regional else "txt2img_ref" if use_ref else "txt2img"
 
     # Generate at a model-friendly size with the requested aspect ratio, then scale to the exact output size.
     aspect = width / height
@@ -30,12 +35,20 @@ def generate(prompt: str, negative: str | None, reference_keys: list[str], seed:
     tokens = {
         "PROMPT": prompt, "NEGATIVE": negative or DEFAULT_NEGATIVE, "SEED": int(seed) % (2**31) or random.randint(1, 2**31 - 1),
         "WIDTH": gw, "HEIGHT": gh, "CHECKPOINT": s.comfyui_checkpoint, "PREFIX": "reelforge",
-        "LCM_LORA": s.comfyui_lcm_lora, "STEPS": s.comfyui_steps, "REF_WEIGHT": s.comfyui_ref_weight,
+        "LCM_LORA": s.comfyui_lcm_lora, "STEPS": s.comfyui_steps, "CFG": s.comfyui_cfg, "REF_WEIGHT": weight,
+        # identity is applied after the first part of sampling, so the prompt sets background, layout and action
+        "REF_START": s.comfyui_ref_start,
     }
-    if use_ref:
-        # IPAdapter takes one image; with several characters use a horizontal strip of their sheets.
+    if regional:
+        tokens["REF_IMAGE"] = comfyui.upload_image(refs[0])
+        tokens["REF_IMAGE_B"] = comfyui.upload_image(refs[1])
+        # left mask covers 0 .. W/2+overlap, right mask starts at W/2-overlap; feathered so the halves blend
+        overlap = gw // 16
+        tokens.update({"MASK_W": gw // 2 + overlap, "RIGHT_X": gw // 2 - overlap, "FEATHER": overlap * 2})
+    elif use_ref:
+        # one character: its own sheet; more than two characters: a strip of the first sheets (may blend them)
         tokens["REF_IMAGE"] = comfyui.upload_image(refs[0] if len(refs) == 1 else _ref_strip(refs))
-    graph = comfyui.load_workflow(workflow, tokens)
+    graph = comfyui.use_fast_vae(comfyui.load_workflow(workflow, tokens))
     data = comfyui.run_workflow(graph)[0]
 
     out = ensure_parent(out_key)

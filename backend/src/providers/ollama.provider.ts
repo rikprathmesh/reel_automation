@@ -22,6 +22,7 @@ export class OllamaTextProvider implements TextGenerationProvider {
       { role: "user", content: input.prompt, ...(input.images?.length ? { images: input.images } : {}) },
     ];
     let outputTokens = 0;
+    let budget = opts.maxTokens ?? 4096;
     for (let attempt = 1; attempt <= 2; attempt++) {
       let res: Awaited<ReturnType<typeof longFetch>>;
       try {
@@ -30,7 +31,7 @@ export class OllamaTextProvider implements TextGenerationProvider {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             model, messages, format, stream: false, keep_alive: 0,
-            options: { temperature: opts.temperature ?? 0.8, num_predict: opts.maxTokens ?? 4096, num_ctx: 8192 },
+            options: { temperature: opts.temperature ?? 0.8, num_predict: budget, num_ctx: Math.max(8192, Math.min(16384, budget + 4096)) },
           }),
           signal: AbortSignal.timeout(45 * 60_000),
         });
@@ -46,7 +47,13 @@ export class OllamaTextProvider implements TextGenerationProvider {
       try { parsed = JSON.parse(raw); } catch { parsed = undefined; }
       const r = schema.safeParse(parsed);
       if (r.success) return { data: r.data as z.infer<S>, model, outputTokens };
-      if (body.done_reason === "length") throw new Error(`Ollama output was cut off at ${opts.maxTokens ?? 4096} tokens`);
+      if (body.done_reason === "length") {
+        if (attempt === 2) throw new Error(`Ollama output was cut off at ${budget} tokens`);
+        // small models sometimes ramble: one more try with more room and an explicit request to be brief
+        budget = Math.min(12_000, Math.round(budget * 1.7));
+        messages[messages.length - 1] = { ...messages[messages.length - 1]!, content: `${input.prompt}\n\nIMPORTANT: your previous answer was too long and was cut off. Keep every text field short (one brief phrase or sentence) and return the complete JSON object.` };
+        continue;
+      }
       if (attempt === 2) throw new Error(`Ollama returned JSON that doesn't match the schema: ${r.error.issues.slice(0, 4).map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
       // one repair round with the validation errors
       messages.push({ role: "assistant", content: raw }, { role: "user", content: `Invalid: ${r.error.issues.slice(0, 8).map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}. Return the corrected complete JSON object.` });

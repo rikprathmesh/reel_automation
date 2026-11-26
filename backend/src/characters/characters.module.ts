@@ -8,6 +8,7 @@ import { ProviderRegistry } from "../providers/providers.module.ts";
 import { zod } from "../common/zod.pipe.ts";
 import { sniffUpload, uploadOptions } from "../common/upload.ts";
 import { CurrentUser, Roles, type SessionUser } from "../auth/decorators.ts";
+import { CATEGORIES } from "../references/platform.ts";
 
 const IMAGE_MAX_MB = 20;
 
@@ -23,6 +24,10 @@ const CharacterBody = z.object({
   expressionPresets: z.record(z.string(), z.string()).default({}),
   isStoryteller: z.boolean().default(false),
   voiceProfileId: z.string().uuid().nullable().default(null),
+  /** voice for Hindi stories; omitted = unchanged */
+  hindiVoiceProfileId: z.string().uuid().nullable().optional(),
+  /** story categories this character belongs to (empty = general kids' cast); omitted = unchanged */
+  categories: z.array(z.enum(CATEGORIES)).optional(),
   active: z.boolean().default(true),
 });
 
@@ -38,6 +43,7 @@ const VoiceBody = z.object({
 
 const characterInclude = {
   voiceProfile: true,
+  hindiVoiceProfile: true,
   referenceImages: { include: { mediaAsset: { select: { storageKey: true, width: true, height: true } } }, orderBy: { createdAt: "desc" as const } },
   _count: { select: { scenes: true } },
 };

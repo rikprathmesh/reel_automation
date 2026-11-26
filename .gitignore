@@ -11,3 +11,7 @@ storage/library/**/*.wav
 __pycache__/
 *.log
 infra/stack.env
+
+# OAuth client files downloaded from Google Cloud / Meta (contain secrets)
+client_secret*.json
+*credentials*.json

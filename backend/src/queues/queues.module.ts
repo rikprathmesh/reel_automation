@@ -1,6 +1,6 @@
 import { Global, Inject, Injectable, Logger, Module, type OnModuleDestroy } from "@nestjs/common";
 import { Controller, Get } from "@nestjs/common";
-import { Queue, Worker, type Job, type JobsOptions } from "bullmq";
+import { FlowProducer, Queue, Worker, type FlowJob, type Job, type JobsOptions } from "bullmq";
 import { Redis } from "ioredis";
 import { REDIS } from "../redis/redis.module.ts";
 import { PrismaService } from "../prisma/prisma.service.ts";
@@ -32,6 +32,7 @@ export class QueuesService implements OnModuleDestroy {
   private readonly log = new Logger("Queues");
   private readonly queues: Record<QueueName, Queue>;
   private readonly workers: Worker[] = [];
+  private flowProducer: FlowProducer | null = null;
 
   constructor(@Inject(REDIS) private readonly redis: Redis, private readonly activity: ActivityService) {
     this.queues = Object.fromEntries(
@@ -70,6 +71,15 @@ export class QueuesService implements OnModuleDestroy {
     this.workers.push(w);
   }
 
+  /**
+   * Adds a job graph: the parent runs only after every child completed (fan-out / fan-in).
+   * Children use failParentOnFailure so a scene that fails for good fails its merge too.
+   */
+  async addFlow(flow: FlowJob) {
+    this.flowProducer ??= new FlowProducer({ connection: this.redis.duplicate() });
+    return this.flowProducer.add(flow);
+  }
+
   queue(name: QueueName): Queue {
     return this.queues[name];
   }
@@ -82,6 +92,7 @@ export class QueuesService implements OnModuleDestroy {
 
   async onModuleDestroy() {
     await Promise.all(this.workers.map((w) => w.close()));
+    await this.flowProducer?.close();
     await Promise.all(QUEUE_NAMES.map((q) => this.queues[q].close()));
   }
 }

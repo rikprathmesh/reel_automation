@@ -8,13 +8,16 @@ export const DialogueLine = z.object({
 });
 
 export const SceneSchema = z.object({
-  description: z.string().describe("What happens in this beat"),
-  visualPrompt: z.string().describe("Image prompt for ONE vertical 9:16 frame: action, composition, setting, lighting, mood. Name characters but do not re-describe their looks."),
+  title: z.string().describe("Short scene title (2-5 words)"),
+  description: z.string().describe("What happens in this beat: concrete, visible actions in story order"),
+  location: z.string().describe("Where it happens (a story-bible location when given)"),
+  events: z.array(z.number().int()).describe("Story-bible event numbers this scene shows (empty if there is no bible)"),
+  visualPrompt: z.string().describe("In ENGLISH: image prompt for ONE vertical 9:16 cute cartoon frame: action, composition, setting, time of day, mood. Name characters but do not re-describe their looks."),
   characters: z.array(z.string()).describe("Cast names present in the frame"),
   expressions: z.array(z.string()).describe("Expression preset per character in the same order, e.g. happy, worried"),
   camera: z.enum(["zoom_in", "zoom_out", "pan_left", "pan_right", "pan_up", "pan_down", "static"]),
   transition: z.enum(["fade", "dissolve", "slideleft", "slideup", "wipeleft", "circleopen", "fadeblack", "cut"]).describe("transition INTO the next scene"),
-  dialogue: z.array(DialogueLine).describe("2-3 lines spoken in this scene: Narrator lines that tell the story plus character lines"),
+  dialogue: z.array(DialogueLine).describe("3-4 lines spoken in this scene: Narrator lines that tell the story plus short character lines"),
   sfx: z.string().describe("One short sound effect, or empty string"),
   onScreenText: z.string().describe("Max 6 words for key beats, or empty string"),
   durationHint: z.number().describe("seconds"),
@@ -61,11 +64,11 @@ export function similarity(a: string, b: string): number {
 }
 
 /** Story quality gate: returns problems the LLM must fix, or [] when the draft is usable. */
-export function storyProblems(d: StoryData, targetWords: number): string[] {
+export function storyProblems(d: StoryData, targetWords: number, minScenes = 6): string[] {
   const lines = d.scenes.flatMap((s) => s.dialogue);
   const words = lines.reduce((n, l) => n + l.text.split(/\s+/).filter(Boolean).length, 0);
   const problems: string[] = [];
-  if (d.scenes.length < 5) problems.push(`Only ${d.scenes.length} scenes; write 6-9 scenes.`);
+  if (d.scenes.length < minScenes - 1) problems.push(`Only ${d.scenes.length} scenes; write at least ${minScenes} scenes so the story is long enough.`);
   if (words < targetWords * 0.65) problems.push(`Far too short: only ${words} spoken words, but the reel needs about ${targetWords}. Add Narrator lines that tell the story in every scene, 2-3 lines per scene.`);
   if (!lines.some((l) => l.speaker.toLowerCase() === "narrator")) problems.push("There are no Narrator lines. The Narrator must carry the story between character lines.");
   const first = d.scenes[0]?.dialogue[0]?.text ?? "";

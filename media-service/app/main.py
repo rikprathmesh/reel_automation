@@ -12,11 +12,11 @@ from typing import TypeVar
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from . import animate, comfyui, compose, image, library, tts, whisper
+from . import animate, clips, comfyui, compose, image, library, tts, whisper
 from .config import get_settings
 from .ffmpeg import FFmpegError, ffmpeg_available, probe_duration
 from .models import (
-    AnimateRequest, AnimateResponse, ComposeRequest, ComposeResponse, Health, ImageRequest, ImageResponse,
+    AnimateRequest, AnimateResponse, ClipAssetsRequest, ClipAssetsResponse, ComposeRequest, ComposeResponse, Health, ImageRequest, ImageResponse,
     KeyResponse, LibraryRequest, LibraryResponse, ProbeRequest, ProbeResponse,
     ThumbnailRequest, TranscribeRequest, TranscribeResponse, TTSRequest, TTSResponse, Voice,
 )
@@ -109,12 +109,19 @@ def transcribe(req: TranscribeRequest) -> dict:
 
 @app.post("/image", response_model=ImageResponse)
 def generate_image(req: ImageRequest) -> dict:
-    return guarded("image", lambda: image.generate(req.prompt, req.negative_prompt, req.reference_keys, req.seed, req.width, req.height, req.out_key))
+    return guarded("image", lambda: image.generate(req.prompt, req.negative_prompt, req.reference_keys, req.seed, req.width, req.height, req.out_key, req.ref_weight))
 
 
 @app.post("/animate", response_model=AnimateResponse)
 def animate_scene(req: AnimateRequest) -> dict:
-    return guarded("animate", lambda: animate.animate(req.image_key, req.duration, req.camera, req.prompt, req.mode, req.out_key))
+    return guarded("animate", lambda: animate.animate(req.image_key, req.duration, req.camera, req.prompt, req.mode, req.out_key,
+                                                     req.negative_prompt, req.reference_keys, req.ref_weight, req.seed))
+
+
+@app.post("/clip-assets", response_model=ClipAssetsResponse)
+def clip_assets(req: ClipAssetsRequest) -> dict:
+    """Unpacks an uploaded scene clip (Google Flow / Veo): duration, audio track, still frame."""
+    return guarded("clip-assets", lambda: clips.clip_assets(req.video_key, req.out_prefix))
 
 
 @app.post("/free")

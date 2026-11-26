@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 import uuid
 from pathlib import Path
@@ -47,9 +48,76 @@ def status() -> dict:
             info = r.json()
         dev = (info.get("devices") or [{}])[0]
         detail = f"ComfyUI {info.get('system', {}).get('comfyui_version', '')} on {dev.get('name', 'unknown device')}".strip()
-        return {"ok": True, "url": s.comfyui_url, "detail": detail, "workflows": available_workflows()}
+        return {"ok": True, "url": s.comfyui_url, "detail": detail, "workflows": available_workflows(), "runnable": runnable_workflows()}
     except Exception as e:
-        return {"ok": False, "url": s.comfyui_url, "detail": f"unreachable: {e}", "workflows": available_workflows()}
+        return {"ok": False, "url": s.comfyui_url, "detail": f"unreachable: {e}", "workflows": available_workflows(), "runnable": []}
+
+
+# input name → ComfyUI model folder, for checking that a workflow's model files are really installed
+_MODEL_INPUTS = {
+    "ckpt_name": "checkpoints", "lora_name": "loras", "vae_name": "vae", "unet_name": "diffusion_models",
+    "clip_name": "text_encoders", "model_name": "animatediff_models", "ipadapter_file": "ipadapter", "clip_vision": "clip_vision",
+}
+_runnable_cache: tuple[float, list[str]] = (0.0, [])
+
+
+def _token_values() -> dict[str, str]:
+    s = get_settings()
+    return {"CHECKPOINT": s.comfyui_checkpoint, "SVD_CHECKPOINT": s.comfyui_svd_checkpoint, "LCM_LORA": s.comfyui_lcm_lora, "MOTION_MODEL": s.animatediff_motion_model}
+
+
+def runnable_workflows() -> list[str]:
+    """Workflows whose node classes AND model files all exist in the running ComfyUI (cached 60 s).
+
+    A workflow file alone proves nothing: img2vid.json ships with the repo, but without svd_xt.safetensors it cannot run.
+    """
+    global _runnable_cache
+    if time.monotonic() - _runnable_cache[0] < 60:
+        return _runnable_cache[1]
+    tokens = _token_values()
+    out: list[str] = []
+    try:
+        with _client() as c:
+            folders: dict[str, set[str]] = {}
+            classes: dict[str, bool] = {}
+
+            def has_model(folder: str, name: str) -> bool:
+                if folder not in folders:
+                    r = c.get(f"/models/{folder}", timeout=5)
+                    folders[folder] = set(r.json()) if r.status_code == 200 else set()
+                return name in folders[folder]
+
+            def has_class(cls: str) -> bool:
+                if cls not in classes:
+                    r = c.get(f"/object_info/{cls}", timeout=5)
+                    classes[cls] = r.status_code == 200 and bool(r.json())
+                return classes[cls]
+
+            for name in available_workflows():
+                graph = json.loads((get_settings().workflows_dir / f"{name}.json").read_text("utf-8"))
+                graph.pop("_comment", None)
+                ok = True
+                for node in graph.values():
+                    if not isinstance(node, dict) or not has_class(node.get("class_type", "")):
+                        ok = False
+                        break
+                    for key, val in (node.get("inputs") or {}).items():
+                        folder = _MODEL_INPUTS.get(key)
+                        if folder and isinstance(val, str):
+                            m = re.fullmatch(r"\{\{(\w+)\}\}", val)
+                            file = tokens.get(m.group(1), "") if m else val
+                            if not file or not has_model(folder, file):
+                                ok = False
+                                break
+                    if not ok:
+                        break
+                if ok:
+                    out.append(name)
+    except Exception as e:  # ComfyUI down: nothing is runnable
+        log.warning("runnable check failed: %s", e)
+        return []
+    _runnable_cache = (time.monotonic(), out)
+    return out
 
 
 def load_workflow(name: str, tokens: dict[str, Any]) -> dict:
@@ -89,9 +157,21 @@ def upload_image(path: Path) -> str:
         raise ComfyUnavailable(f"ComfyUI unreachable at {get_settings().comfyui_url}: {e}") from e
 
 
-def run_workflow(graph: dict) -> list[bytes]:
+def use_fast_vae(graph: dict) -> dict:
+    """Decodes with the tiny TAESD decoder instead of the checkpoint VAE (seconds instead of minutes on CPU)."""
+    s = get_settings()
+    if s.comfyui_vae:
+        graph["20vae"] = {"class_type": "VAELoader", "inputs": {"vae_name": s.comfyui_vae}}
+        for node in graph.values():
+            if node.get("class_type") == "VAEDecode":
+                node["inputs"]["vae"] = ["20vae", 0]
+    return graph
+
+
+def run_workflow(graph: dict, timeout_sec: int | None = None) -> list[bytes]:
     """Queues a prompt, waits for it, returns the produced images (in output order)."""
     s = get_settings()
+    timeout = timeout_sec or s.comfyui_timeout_sec
     client_id = uuid.uuid4().hex
     try:
         with _client() as c:
@@ -100,7 +180,7 @@ def run_workflow(graph: dict) -> list[bytes]:
                 raise ComfyFailed(f"ComfyUI rejected the workflow: {r.text[:800]}")
             r.raise_for_status()
             prompt_id = r.json()["prompt_id"]
-            deadline = time.monotonic() + s.comfyui_timeout_sec
+            deadline = time.monotonic() + timeout
             missing = 0
             while True:
                 h = c.get(f"/history/{prompt_id}")
@@ -121,7 +201,7 @@ def run_workflow(graph: dict) -> list[bytes]:
                     if st.get("completed", False) or entry.get("outputs"):
                         break
                 if time.monotonic() > deadline:
-                    raise ComfyFailed(f"ComfyUI job {prompt_id} timed out after {s.comfyui_timeout_sec}s")
+                    raise ComfyFailed(f"ComfyUI job {prompt_id} timed out after {timeout}s")
                 time.sleep(1.5)
             images: list[bytes] = []
             for node_id in sorted(entry["outputs"], key=lambda x: int(x) if str(x).isdigit() else 0):

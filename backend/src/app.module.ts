@@ -21,6 +21,7 @@ import { StoriesModule } from "./stories/stories.module.ts";
 import { ProductionModule } from "./production/production.module.ts";
 import { ReviewModule } from "./review/review.module.ts";
 import { PublishingModule } from "./publishing/publishing.module.ts";
+import { FlowModule } from "./flow/flow.module.ts";
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { PublishingModule } from "./publishing/publishing.module.ts";
     ProductionModule,
     ReviewModule,
     PublishingModule,
+    FlowModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

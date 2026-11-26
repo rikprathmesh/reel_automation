@@ -6,6 +6,7 @@
 import argon2 from "argon2";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client.ts";
+import { seedCast } from "./seed-cast.ts";
 
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }) });
 
@@ -63,6 +64,8 @@ async function main() {
     },
   ];
   for (const c of characters) await prisma.character.upsert({ where: { name: c.name }, create: c, update: {} });
+  // Hindi voices + the Mahabharat / Ramayan / Shivaji Maharaj casts
+  await seedCast(prisma);
 
   const schedules = await prisma.dailySchedule.count();
   if (!schedules) {
@@ -73,7 +76,7 @@ async function main() {
         startTime: "01:00",
         timezone: process.env.TZ_NAME || Intl.DateTimeFormat().resolvedOptions().timeZone,
         categories: ["rabbit_squirrel_adventure", "kids_moral", "friendship_kindness", "funny_animals", "inspirational"],
-        language: "en",
+        language: "hi",
         maxConcurrency: 1,
       },
     });

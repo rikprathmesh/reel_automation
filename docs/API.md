@@ -25,6 +25,19 @@ All routes are under `/api`, JSON, and require the `rf_session` cookie (sign in 
 | GET | `/api/integrations` |
 | PUT | `/api/integrations` |
 | GET | `/api/jobs` |
+| GET | `/api/prompts/models` (adapter capabilities + whether each can actually run) |
+| GET | `/api/prompts/story/:id` (bible, scenes with current prompts, character prompts, pending jobs) |
+| POST | `/api/prompts/story/:id/generate` (queued) |
+| GET | `/api/prompts/scene/:id/versions` |
+| POST | `/api/prompts/scene/:id/generate` (queued) |
+| POST | `/api/prompts/:id/transform` (improve / shorten / expand / instruct; queued) |
+| PUT | `/api/prompts/:id` (manual edit → new version) |
+| POST | `/api/prompts/:id/model` (re-render for another model, no LLM) |
+| POST | `/api/prompts/:id/restore` |
+| POST | `/api/prompts/:id/apply-template` |
+| GET | `/api/prompts/templates` |
+| POST | `/api/prompts/templates` |
+| POST | `/api/prompts/character/:id/profile` (queued) |
 | GET | `/api/media/*key` |
 | GET | `/api/oauth/instagram/callback` |
 | GET | `/api/oauth/instagram/start` |

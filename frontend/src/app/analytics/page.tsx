@@ -19,7 +19,7 @@ export default function AnalyticsPage() {
     <>
       <PageHeader title="Analytics" description="Views and engagement from YouTube and Instagram, refreshed every 6 hours."
         actions={<Button variant="outline" disabled={refresh.isPending} onClick={() => refresh.mutate(undefined, { onSuccess: (r) => toast.success(`Updated ${r.updated} video(s)`), onError: (e) => toast.error(errMsg(e)) })}><RefreshCw /> Refresh now</Button>} />
-      {a.isError && <p className="text-sm text-red-400">{errMsg(a.error)}</p>}
+      {a.isError && <p className="text-sm text-red-600 dark:text-red-400">{errMsg(a.error)}</p>}
       {a.isPending && <Skeleton className="h-40" />}
       {t && (
         <div className="mb-5 grid gap-3 sm:grid-cols-3">

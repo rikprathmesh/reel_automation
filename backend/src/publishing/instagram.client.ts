@@ -62,11 +62,15 @@ export class InstagramClient {
   async connectFromLogin(longLivedToken: string) {
     if (this.oauthConfigured) {
       const appToken = `${this.appId}|${this.appSecret}`;
-      const dbg = await j<{ data: { app_id?: string; is_valid?: boolean; expires_at?: number } }>(
+      const dbg = await j<{ data: { app_id?: string; is_valid?: boolean; expires_at?: number; granular_scopes?: { scope: string; target_ids?: string[] }[] } }>(
         await fetch(`${this.graph}/debug_token?input_token=${encodeURIComponent(longLivedToken)}&access_token=${encodeURIComponent(appToken)}`), "token check");
       if (!dbg.data.is_valid || dbg.data.app_id !== this.appId) throw new Error("The returned token is not valid for this Meta app");
-      const r = await this.connect(longLivedToken);
-      return { ...r, expiresAt: dbg.data.expires_at ? new Date(dbg.data.expires_at * 1000) : new Date(Date.now() + 60 * 86400_000) };
+      // The token lists exactly which IG accounts the user granted. Using it directly also works when the Page
+      // sits in a Business portfolio, where /me/accounts comes back empty.
+      const granted = dbg.data.granular_scopes?.find((g) => (g.scope === "instagram_content_publish" || g.scope === "instagram_basic") && g.target_ids?.length);
+      const r = await this.connect(longLivedToken, granted?.target_ids?.[0]);
+      // connect() swaps the token for a ~60-day one; its expiry wins over the expiry of the token Meta handed back
+      return { ...r, expiresAt: r.expiresAt ?? (dbg.data.expires_at ? new Date(dbg.data.expires_at * 1000) : new Date(Date.now() + 60 * 86400_000)) };
     }
     return this.connect(longLivedToken);
   }
@@ -82,7 +86,8 @@ export class InstagramClient {
       const pages = await j<{ data: { name: string; instagram_business_account?: { id: string; username?: string } }[] }>(
         await fetch(`${this.graph}/me/accounts?fields=name,instagram_business_account{id,username}&access_token=${encodeURIComponent(t)}`), "page lookup");
       const p = pages.data.find((x) => x.instagram_business_account);
-      if (!p?.instagram_business_account) throw new Error("No Instagram Professional account is linked to your Facebook Pages (required by the Instagram Graph API)");
+      if (!pages.data.length) throw new Error("This login did not grant access to any Facebook Page or Instagram account. On Facebook open Settings → Business integrations → your Meta app → View and edit, turn on your Page and Instagram account (or remove the app), then click Connect again. Your Instagram Professional account must also be linked to a Facebook Page.");
+      if (!p?.instagram_business_account) throw new Error(`None of your allowed Facebook Pages (${pages.data.map((x) => x.name).join(", ")}) has an Instagram Professional account linked. Link your Instagram Business/Creator account to one of them (Page settings → Linked accounts → Instagram), then connect again.`);
       acct = { id: p.instagram_business_account.id, username: p.instagram_business_account.username ?? p.name };
     }
     return { credentials: { accessToken: t, igUserId: acct.id } satisfies IgCredentials, username: acct.username, expiresAt: long.expires_in ? new Date(Date.now() + long.expires_in * 1000) : null };

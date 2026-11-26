@@ -6,7 +6,8 @@ export function PageHeader({ title, description, actions }: { title: string; des
   return (
     <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+        <div className="mb-1 text-xs text-muted-foreground">Home <span className="mx-1 opacity-60">/</span> <span className="text-foreground/80">{title}</span></div>
+        <h1 className="text-[22px] font-semibold tracking-tight">{title}</h1>
         {description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}
       </div>
       {actions}

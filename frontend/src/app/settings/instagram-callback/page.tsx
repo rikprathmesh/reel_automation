@@ -49,8 +49,8 @@ export default function InstagramCallbackPage() {
       <Card className="w-full max-w-md">
         <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
           {state.kind === "working" && <Loader2 className="size-8 animate-spin text-primary" />}
-          {state.kind === "ok" && <CheckCircle2 className="size-8 text-emerald-400" />}
-          {state.kind === "error" && <XCircle className="size-8 text-red-400" />}
+          {state.kind === "ok" && <CheckCircle2 className="size-8 text-emerald-600 dark:text-emerald-400" />}
+          {state.kind === "error" && <XCircle className="size-8 text-red-600 dark:text-red-400" />}
           <p className="text-sm">{state.message}</p>
           {state.kind === "error" && <Button variant="outline" onClick={() => router.replace("/settings?tab=social")}>Back to Settings</Button>}
         </CardContent>

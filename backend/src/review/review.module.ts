@@ -55,13 +55,17 @@ class ReviewController {
       include: {
         videoAsset: { select: { storageKey: true } },
         thumbnailAsset: { select: { storageKey: true } },
-        script: { include: { scenes: { orderBy: { index: "asc" }, select: { index: true, description: true, dialogue: true, onScreenText: true } } } },
+        script: { include: { scenes: { orderBy: { index: "asc" }, select: { id: true, index: true, title: true, description: true, dialogue: true, onScreenText: true } } } },
+        sceneJobs: { orderBy: { index: "asc" }, select: { sceneId: true, index: true, status: true, imageKey: true, clipKey: true, reusedFromId: true, timings: true, error: true } },
         project: { include: { story: true } },
         approvals: { orderBy: { decidedAt: "desc" }, take: 1, include: { user: { select: { displayName: true } } } },
         publishingJobs: { select: { id: true, platform: true, status: true, scheduledFor: true, published: { select: { url: true } } } },
       },
     });
-    return versions.map(({ videoAsset, thumbnailAsset, ...v }) => ({ ...v, videoUrl: mediaUrl(videoAsset?.storageKey), thumbnailUrl: mediaUrl(thumbnailAsset?.storageKey) }));
+    return versions.map(({ videoAsset, thumbnailAsset, sceneJobs, ...v }) => ({
+      ...v, videoUrl: mediaUrl(videoAsset?.storageKey), thumbnailUrl: mediaUrl(thumbnailAsset?.storageKey),
+      sceneJobs: sceneJobs.map(({ imageKey, clipKey, ...r }) => ({ ...r, imageUrl: mediaUrl(imageKey), clipUrl: mediaUrl(clipKey), reused: Boolean(r.reusedFromId) })),
+    }));
   }
 
   @Post("versions/:id/approve")
@@ -152,6 +156,23 @@ class ReviewController {
     if (["generating", "publishing", "published"].includes(p.status)) throw new ConflictException(`Project is "${p.status}"`);
     await this.production.rerender(id);
     await this.activity.record({ entityType: "project", entityId: id, action: "regenerate", actorUserId: u.id, message: "Regeneration requested" });
+    return { ok: true };
+  }
+
+  /**
+   * Regenerates ONE scene: a new version that redraws only that scene (new seed) and reuses every other finished scene,
+   * then re-merges. The new version needs its own review and approval; the old one is superseded when it is ready.
+   */
+  @Post("versions/:id/scenes/:sceneId/regenerate")
+  @Roles("owner", "editor")
+  async regenerateScene(@Param("id", ParseUUIDPipe) id: string, @Param("sceneId", ParseUUIDPipe) sceneId: string, @CurrentUser() u: SessionUser) {
+    const v = await this.prisma.videoVersion.findUnique({ where: { id }, include: { project: true, sceneJobs: { where: { sceneId }, select: { index: true } }, publishingJobs: { select: { status: true } } } });
+    if (!v || v.project.deletedAt) throw new NotFoundException("Version not found");
+    if (!v.sceneJobs.length) throw new BadRequestException("This version was rendered before scene jobs existed (or the scene is not part of it): use Regenerate for the whole reel");
+    if (["generating", "queued", "publishing"].includes(v.project.status)) throw new ConflictException(`Project is "${v.project.status}"`);
+    if (v.publishingJobs.some((j) => ["uploading", "published"].includes(j.status))) throw new ConflictException("This version is already uploading/published");
+    await this.production.rerenderScenes(v.projectId, id, [sceneId]);
+    await this.activity.record({ entityType: "version", entityId: id, action: "scene_regenerate", actorUserId: u.id, message: `Scene ${v.sceneJobs[0]!.index + 1} of v${v.versionNo} queued for regeneration; other scenes are reused` });
     return { ok: true };
   }
 

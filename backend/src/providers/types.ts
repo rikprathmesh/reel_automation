@@ -26,15 +26,24 @@ export interface TextGenerationProvider extends BaseProvider {
   generateJson<S extends z.ZodType>(input: TextInput, schema: S, opts?: { maxTokens?: number; temperature?: number }): Promise<{ data: z.infer<S>; model: string; outputTokens: number }>;
 }
 
-export interface ImageRequest { prompt: string; negativePrompt: string; referenceKeys: string[]; seed: number; width: number; height: number; outKey: string }
+export interface ImageRequest {
+  prompt: string; negativePrompt: string; referenceKeys: string[]; seed: number; width: number; height: number; outKey: string;
+  /** IP-Adapter strength for referenceKeys (0-1); omitted = media-service default */
+  referenceWeight?: number;
+}
 export interface ImageGenerationProvider extends BaseProvider {
   generate(req: ImageRequest): Promise<{ key: string; workflow: string }>;
 }
 
 export type CameraMove = "zoom_in" | "zoom_out" | "pan_left" | "pan_right" | "pan_up" | "pan_down" | "static";
-export interface AnimateRequest { imageKey: string; durationSec: number; camera: CameraMove; prompt: string; outKey: string }
+export interface AnimateRequest {
+  imageKey: string; durationSec: number; camera: CameraMove; prompt: string; outKey: string;
+  /** AI video models only: character reference images, negative prompt, seed */
+  negativePrompt?: string; referenceKeys?: string[]; referenceWeight?: number; seed?: number;
+}
 export interface VideoGenerationProvider extends BaseProvider {
-  animate(req: AnimateRequest): Promise<{ key: string; mode: string }>;
+  /** motionSec = seconds of real AI motion in the clip (0 for camera motion over a still) */
+  animate(req: AnimateRequest): Promise<{ key: string; mode: string; motionSec: number }>;
 }
 
 export interface Word { word: string; start: number; end: number }

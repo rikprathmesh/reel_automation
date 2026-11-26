@@ -7,7 +7,7 @@
   "6": { "class_type": "CLIPTextEncode", "inputs": { "text": "{{PROMPT}}", "clip": ["13", 1] } },
   "7": { "class_type": "CLIPTextEncode", "inputs": { "text": "{{NEGATIVE}}", "clip": ["13", 1] } },
   "3": { "class_type": "KSampler", "inputs": {
-    "seed": "{{SEED}}", "steps": "{{STEPS}}", "cfg": 1.5, "sampler_name": "lcm", "scheduler": "sgm_uniform", "denoise": 1.0,
+    "seed": "{{SEED}}", "steps": "{{STEPS}}", "cfg": "{{CFG}}", "sampler_name": "lcm", "scheduler": "sgm_uniform", "denoise": 1.0,
     "model": ["14", 0], "positive": ["6", 0], "negative": ["7", 0], "latent_image": ["5", 0] } },
   "8": { "class_type": "VAEDecode", "inputs": { "samples": ["3", 0], "vae": ["4", 2] } },
   "9": { "class_type": "SaveImage", "inputs": { "filename_prefix": "{{PREFIX}}", "images": ["8", 0] } }

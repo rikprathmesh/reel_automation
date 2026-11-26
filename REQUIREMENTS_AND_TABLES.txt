@@ -1,0 +1,198 @@
+REELFORGE AI - HARDWARE REQUIREMENTS, TIMINGS & DATABASE TABLES (my reference notes)
+====================================================================================
+Written 26-11-2026. Numbers below were MEASURED on this laptop on 26-11-2026, not guessed.
+This laptop: Intel i5-1035G1 (4 cores / 8 threads), 16 GB RAM, Intel UHD graphics
+(no NVIDIA card), Windows 11. See also: RUNNING_NOTES.txt (how to run) and
+FEATURE_QA_NOTES.txt (how it works).
+
+Contents
+  1. What happens to the laptop while a reel is being made
+  2. Why a 1-minute reel takes so long (even with async jobs)
+  3. Hardware requirements
+  4. Where data is stored (database tables), characters in detail
+
+
+#######################################################################################
+#  1. WHAT HAPPENS TO THE LAPTOP WHILE A REEL IS BEING MADE                            #
+#######################################################################################
+
++----------------+-----------------------------------------------------------------------+
+| Part           | What happens / what you notice                                        |
++----------------+-----------------------------------------------------------------------+
+| CPU (4 cores)  | 90-100% on all cores for the whole run. Fans loud, laptop hot.        |
+|                | Windows then slows the CPU to protect it (throttling), so later       |
+|                | steps take longer than the first ones.                                |
++----------------+-----------------------------------------------------------------------+
+| RAM (16 GB)    | Writing AI (Ollama, qwen2.5 7B) uses ~5.5 GB, picture AI (ComfyUI)    |
+|                | ~4-6 GB. With Chrome, VS Code and Windows only 1-3 GB is left.        |
+|                | When RAM runs out Windows swaps to disk and everything crawls.        |
+|                | (This crashed the AnimateDiff animation test: "not enough memory".)   |
++----------------+-----------------------------------------------------------------------+
+| Graphics       | The Intel UHD chip is NOT used. AI tools need an NVIDIA card (CUDA),  |
+|                | so all AI work falls on the CPU.                                      |
++----------------+-----------------------------------------------------------------------+
+| Disk           | Models are loaded from disk at each step change (5.5 GB writer).      |
+|                | First picture after a restart took 18 min instead of 3 (cold start).  |
++----------------+-----------------------------------------------------------------------+
+| You            | Other apps feel slow. Keep it plugged in, don't let it sleep, close   |
+|                | heavy apps (many Chrome tabs) during long runs. Closing the lid or    |
+|                | shutting down stops the job (it resumes later, but loses time).       |
++----------------+-----------------------------------------------------------------------+
+
+
+#######################################################################################
+#  2. WHY A 1-MINUTE REEL TAKES SO LONG (EVEN WITH ASYNC JOBS)                         #
+#######################################################################################
+
+Answer: it is the HARDWARE, not the code (roughly 90-95% hardware).
+
+Measured step times (local mode):
++------------------------------------------------+---------------------+--------------------------+
+| Step                                           | This laptop (CPU)   | With NVIDIA RTX 3060     |
+|                                                |                     | 12 GB (typical)          |
++------------------------------------------------+---------------------+--------------------------+
+| Writing: story + characters + script + prompts | 40-60 min           | ~3-6 min                 |
+| One scene picture                              | 3-3.5 min           | ~5-10 sec                |
+|                                                | (18 min cold start) |                          |
+| Voices for one scene                           | ~1 min              | a few seconds            |
+| Merge + render final video                     | 5-6 min             | ~2-4 min (mostly CPU)    |
++------------------------------------------------+---------------------+--------------------------+
+| TOTAL for a 1-minute reel (local mode)         | ~1.5-2 hours        | ~10-15 min               |
++------------------------------------------------+---------------------+--------------------------+
+| Google Flow mode: assemble uploaded clips      | ~5 min              | ~3 min                   |
++------------------------------------------------+---------------------+--------------------------+
+
+Why async did NOT make one reel faster:
+  - The scene jobs ARE independent, but there is only ONE CPU and room for ONE AI model in RAM.
+  - Running two jobs at the same time splits the same CPU in half: each takes twice as long,
+    the total stays the same (and RAM can run out).
+  - What async DID give: reliability (resume after a crash / restart, finished scenes are kept),
+    "Regenerate scene" for one bad scene (minutes instead of the whole reel), and the ability to
+    run in PARALLEL later on a GPU or a second machine without changing the code.
+
+What the code could still save (honestly ~10-20%, not 10x):
+  - Keep the writing AI loaded during the whole writing phase instead of reloading it each step.
+  - Fewer AI calls (write all scene prompts in one go, avoid full re-drafts).
+  - Warm up the picture model to avoid the cold-start penalty.
+
+
+#######################################################################################
+#  3. HARDWARE REQUIREMENTS                                                            #
+#######################################################################################
+
++---------------------------+--------------------------------------+------------------------------------+
+| Goal                      | What you need                        | Effect                             |
++---------------------------+--------------------------------------+------------------------------------+
+| Google Flow mode          | THIS LAPTOP IS FINE. Google's        | Writing ~40-60 min (run it         |
+| (chosen 26-11-2026)       | servers make the animation + voices; | overnight), assembly ~5 min.       |
+|                           | the laptop only writes + assembles.  | Quality = your manual Flow videos. |
++---------------------------+--------------------------------------+------------------------------------+
+| Faster writing + local    | NVIDIA RTX 3060 12 GB (or RTX 4060   | Local reel in ~10-15 min,          |
+| pictures                  | Ti 16 GB), 32 GB RAM, NVMe SSD       | 5 reels/day easily, AnimateDiff    |
+|                           |                                      | (short local animation) usable.    |
++---------------------------+--------------------------------------+------------------------------------+
+| Real animation fully      | NVIDIA 16-24 GB (RTX 4070 Ti Super / | Real AI motion locally, minutes    |
+| local (Wan 2.1 /          | 4080 / 3090 / 4090), 32-64 GB RAM,   | per clip. Still below Google Veo   |
+| LTX-Video)                | 1 TB NVMe SSD                        | quality.                           |
++---------------------------+--------------------------------------+------------------------------------+
+| Minimum to run at all     | 4-core CPU, 16 GB RAM, ~40 GB free   | What we have: works, but slowly,   |
+| (current)                 | disk for models (D:\ai-models)       | stills + camera motion only.       |
++---------------------------+--------------------------------------+------------------------------------+
+
+Note: any NVIDIA card must have enough VRAM (graphics memory); 8 GB is the bare minimum for
+pictures, 12 GB+ for comfortable use, 16-24 GB for local video models. AMD/Intel graphics are
+not supported by most of these AI tools on Windows.
+
+
+#######################################################################################
+#  4. WHERE DATA IS STORED (DATABASE TABLES)                                           #
+#######################################################################################
+
+Database: PostgreSQL 18 (local), database "reelforge". Big files (videos, pictures, audio)
+are NOT inside the database: they are files in D:\reel-creator-automation\storage\ and the
+database stores their path ("storageKey" in table MediaAsset).
+
+4a. CHARACTERS - exactly where everything about a character is stored
++---------------------------------+---------------------------+-----------------------------------------------+
+| What                            | Table                     | Key columns / notes                           |
++---------------------------------+---------------------------+-----------------------------------------------+
+| The character itself            | Character                 | id, name, species, description, appearance,   |
+|                                 |                           | furColors, clothingColors, personality,       |
+|                                 |                           | basePrompt (identity text), identityPrompt,   |
+|                                 |                           | visualProfile (full design: face, eyes, body, |
+|                                 |                           | clothing, accessories, colours, expressions,  |
+|                                 |                           | voice), negativePrompt, seed,                 |
+|                                 |                           | expressionPresets, categories (e.g. ramayan;  |
+|                                 |                           | empty = general kids' cast), isStoryteller,   |
+|                                 |                           | active, deletedAt                             |
++---------------------------------+---------------------------+-----------------------------------------------+
+| Its pictures (master / views)   | CharacterReferenceImage   | characterId, mediaAssetId, kind (front, side, |
+|                                 |                           | back, three_quarter, closeup, sheet,          |
+|                                 |                           | uploaded), isPrimary                          |
++---------------------------------+---------------------------+-----------------------------------------------+
+| Where each picture file is      | MediaAsset                | storageKey (e.g. characters/<id>/sheet.png),  |
+|                                 |                           | size, checksum. File itself:                  |
+|                                 |                           | storage\characters\<character id>\            |
++---------------------------------+---------------------------+-----------------------------------------------+
+| Its voices                      | VoiceProfile              | linked from Character.voiceProfileId          |
+|                                 |                           | (English) and Character.hindiVoiceProfileId   |
+|                                 |                           | (Hindi)                                       |
++---------------------------------+---------------------------+-----------------------------------------------+
+| Its reference-view prompts      | GeneratedPrompt           | characterId, kind = character_reference,      |
+| (front, side, back, ...)        |                           | view, positive, negative, version, isCurrent  |
++---------------------------------+---------------------------+-----------------------------------------------+
+| Which scenes it appears in      | StorySceneCharacter       | sceneId, characterId, expressionPreset        |
++---------------------------------+---------------------------+-----------------------------------------------+
+
+See your characters (pgAdmin, database reelforge):
+  SELECT name, species, categories, "basePrompt", "voiceProfileId", "hindiVoiceProfileId"
+  FROM "Character" WHERE "deletedAt" IS NULL ORDER BY "createdAt";
+
+4b. ALL TABLES - what is stored where
++---------------------------+---------------------------------------------------------------------+
+| Table                     | What it stores                                                      |
++---------------------------+---------------------------------------------------------------------+
+| User                      | your login (email, password hash, role)                             |
+| Story                     | each story: title, category, language, audience (ageGroup), style,  |
+|                           | length, source (AI / my idea / my full story / episode), your text  |
+|                           | (sourceText), story bible (understanding), episode number           |
+| StoryScript               | script versions: narration, titles, captions, hashtags, music       |
+| StoryScene                | scenes: title, description, location, dialogue, camera, sfx,        |
+|                           | uploaded Google Flow clip (clipAssetId)                             |
+| StorySceneCharacter       | which characters appear in which scene                              |
+| Character                 | permanent characters (see 4a)                                       |
+| CharacterReferenceImage   | character pictures (see 4a)                                         |
+| VoiceProfile              | voices (Kokoro voice id, language, speed, style, narrator)          |
+| GeneratedPrompt           | scene prompts and character view prompts, every version (history)   |
+| PromptTemplate            | saved reusable camera / look / negatives                            |
+| MediaAsset                | every generated or uploaded file: path, type, size, checksum        |
+| VideoProject              | one reel (for one story) and its status                             |
+| VideoVersion              | each render of a reel: status, checks (validation), timings, video  |
+| SceneGenerationJob        | each scene of each render: picture, voices, clip, timings, status   |
+| VideoGenerationJob        | the render job: stage, progress %, attempts, error                  |
+| Approval                  | your approve / reject / request-changes decisions (who, when)       |
+| PublishingAccount         | connected YouTube / Instagram (tokens encrypted)                    |
+| PublishingJob             | each upload: platform, status, scheduled time, errors               |
+| PublishedVideo            | published links / ids                                               |
+| VideoAnalytics            | views, likes, comments over time                                    |
+| ReferenceVideo            | Reference Library videos (URL / upload, transcript)                 |
+| ReferenceAnalysis         | style analysis of each reference video                              |
+| DailySchedule             | daily automation settings (on/off, count, time, categories)         |
+| ScheduleRun               | each day's automatic run                                            |
+| SystemSetting             | settings (generation defaults, AI provider selection)               |
+| ActivityLog               | everything that happened (Overview / Live log)                      |
++---------------------------+---------------------------------------------------------------------+
+
+Files on disk (D:\reel-creator-automation\storage\):
++------------------------------------+-------------------------------------------------------------+
+| Folder                             | Contents                                                    |
++------------------------------------+-------------------------------------------------------------+
+| projects\<reel id>\v1, v2, ...\    | final reel.mp4, thumbnail, scene pictures, voices, clips    |
+| stories\<story id>\flow\           | clips uploaded from Google Flow (+ their audio and frame)   |
+| characters\<character id>\         | character pictures                                          |
+| references\                        | Reference Library videos                                    |
+| library\music, library\sfx         | background music and sound effects (add CC0 files here)     |
++------------------------------------+-------------------------------------------------------------+
+
+Backup both together: scripts\backup.ps1 (database dump + storage copy -> D:\reelforge-backups).
+Fresh start (deletes all generated work, keeps setup): scripts\reset-generated-content.sql.

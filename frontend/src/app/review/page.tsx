@@ -24,8 +24,8 @@ const FILTERS = [
 ] as const;
 
 const STATUS_STYLE: Record<string, string> = {
-  ready: "bg-sky-500/15 text-sky-300", approved: "bg-emerald-500/15 text-emerald-300", rejected: "bg-red-500/15 text-red-300",
-  changes_requested: "bg-amber-500/15 text-amber-300",
+  ready: "bg-sky-500/15 text-sky-600 dark:text-sky-300", approved: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300", rejected: "bg-red-500/15 text-red-600 dark:text-red-300",
+  changes_requested: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
 };
 
 function StatusPill({ status }: { status: string }) {
@@ -66,6 +66,41 @@ function MetadataEditor({ v }: { v: ReviewVersion }) {
           {save.isPending ? "Saving…" : "Save title & captions"}
         </Button>
         {locked && <span className="ml-3 text-xs text-muted-foreground">Locked — already publishing</span>}
+      </div>
+    </div>
+  );
+}
+
+const mins = (s: number | undefined) => (s == null ? "—" : s < 90 ? `${Math.round(s)} s` : `${(s / 60).toFixed(1)} min`);
+
+/** Per-scene outputs of this render, with timings and single-scene regeneration. */
+function ScenesPanel({ v }: { v: ReviewVersion }) {
+  const regen = useApiMutation((sceneId: string) => api.post(`/versions/${v.id}/scenes/${sceneId}/regenerate`), [["review"], ["projects"], ["jobs"]]);
+  const t = v.timings;
+  if (!v.sceneJobs?.length) return <p className="text-sm text-muted-foreground">This version was rendered before per-scene jobs existed. Use Regenerate for the whole reel.</p>;
+  const canRegen = ["ready", "rejected", "changes_requested"].includes(v.status);
+  return (
+    <div className="flex flex-col gap-3">
+      {t && (
+        <p className="text-xs text-muted-foreground">
+          Render time: scenes {mins(t.scenesWorkSec)} · merge {mins(t.merge?.totalSec)} (camera motion {mins(t.merge?.clipsSec)}, render {mins(t.merge?.renderSec)}) · wall clock {mins(t.wallSec)}{t.reused ? ` · ${t.reused} scene(s) reused` : ""}
+        </p>
+      )}
+      <p className="text-xs text-muted-foreground">Regenerating a scene makes a new version that redraws only that scene and reuses the others. It needs its own review and approval.</p>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        {v.sceneJobs.map((r) => {
+          const scene = v.script.scenes.find((s) => s.id === r.sceneId);
+          return (
+            <div key={r.sceneId} className="flex flex-col gap-1.5 rounded-lg border border-border/60 p-2 text-xs">
+              <div className="aspect-9/16 overflow-hidden rounded-md bg-muted/40">{r.imageUrl && <img src={r.imageUrl} alt={`Scene ${r.index + 1}`} className="size-full object-cover" />}</div>
+              <div className="font-medium">Scene {r.index + 1}{scene?.title ? ` · ${scene.title}` : ""}</div>
+              <div className="text-muted-foreground">
+                {r.reused ? "reused from the previous version" : r.status !== "completed" ? r.status : `image ${mins(r.timings?.image)} · voice ${mins(r.timings?.voice)}${r.timings?.clip ? ` · AI clip ${mins(r.timings.clip)}` : ""}`}
+              </div>
+              <Button size="sm" variant="outline" disabled={!canRegen || regen.isPending} onClick={() => regen.mutate(r.sceneId, { onSuccess: () => toast.success(`Scene ${r.index + 1} queued: a new version will appear in Review when it is re-merged`), onError: (e) => toast.error(errMsg(e)) })}><RefreshCw /> Regenerate scene</Button>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -130,9 +165,10 @@ function Workspace({ v }: { v: ReviewVersion }) {
           {v.videoUrl ? <video key={v.id} src={v.videoUrl} poster={v.thumbnailUrl ?? undefined} controls playsInline className="size-full object-contain" /> : <div className="grid size-full place-items-center text-sm text-muted-foreground">No video</div>}
         </div>
         <div className="flex flex-wrap items-center justify-center gap-2 text-xs">
-          {val?.ok ? <span className="flex items-center gap-1 text-emerald-400"><CheckCircle2 className="size-3.5" /> {val.width}×{val.height} · {val.fps} fps · validated</span>
-            : <span className="flex items-center gap-1 text-red-400"><ShieldAlert className="size-3.5" /> {val?.problems.join("; ") ?? "not validated"}</span>}
+          {val?.ok ? <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400"><CheckCircle2 className="size-3.5" /> {val.width}×{val.height} · {val.fps} fps · validated</span>
+            : <span className="flex items-center gap-1 text-red-600 dark:text-red-400"><ShieldAlert className="size-3.5" /> {val?.problems.join("; ") ?? "not validated"}</span>}
         </div>
+        {val?.warnings?.map((w) => <p key={w} className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">{w}</p>)}
         <div className="grid grid-cols-2 gap-2">
           {v.videoUrl && <a href={v.videoUrl} download={`${story.title}.mp4`}><Button variant="outline" className="w-full"><Download /> Download</Button></a>}
           <Button variant="outline" disabled={regen.isPending || !["ready", "rejected", "changes_requested"].includes(v.status)} onClick={() => regen.mutate(undefined, { onSuccess: () => toast.success("Regeneration queued — a new version will appear here"), onError: (e) => toast.error(errMsg(e)) })}><RefreshCw /> Regenerate</Button>
@@ -152,11 +188,13 @@ function Workspace({ v }: { v: ReviewVersion }) {
           <Tabs defaultValue="publish">
             <TabsList className="mb-4 flex-wrap">
               <TabsTrigger value="publish">Approve & publish</TabsTrigger>
+              <TabsTrigger value="scenes">Scenes</TabsTrigger>
               <TabsTrigger value="script">Script</TabsTrigger>
               <TabsTrigger value="captions">Title & captions</TabsTrigger>
               <TabsTrigger value="history">History</TabsTrigger>
             </TabsList>
             <TabsContent value="publish"><ApprovePanel v={v} /></TabsContent>
+            <TabsContent value="scenes"><ScenesPanel v={v} /></TabsContent>
             <TabsContent value="script">
               <div className="flex max-h-[60vh] flex-col gap-3 overflow-y-auto pr-1">
                 {v.script.scenes.map((s) => (
@@ -213,7 +251,7 @@ export default function ReviewStudioPage() {
       <div className="mb-4 flex flex-wrap gap-1.5">
         {FILTERS.map(([k, label]) => <Button key={k} size="sm" variant={filter === k ? "default" : "outline"} onClick={() => { setFilter(k); setSelected(null); }}>{label}</Button>)}
       </div>
-      {review.isError && <p className="text-sm text-red-400">{errMsg(review.error)}</p>}
+      {review.isError && <p className="text-sm text-red-600 dark:text-red-400">{errMsg(review.error)}</p>}
       <div className="grid gap-5 lg:grid-cols-[300px_1fr]">
         <div className="flex max-h-[80vh] flex-col gap-2 overflow-y-auto pr-1">
           {review.isPending && Array.from({ length: 3 }, (_, i) => <Skeleton key={i} className="h-28" />)}

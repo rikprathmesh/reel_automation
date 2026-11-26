@@ -1,0 +1,274 @@
+REELFORGE AI - HOW IT WORKS & FEATURE QUESTIONS (my reference notes)
+=====================================================================
+Purpose of this file: if I forget how ReelForge works, read sections A, B and C first.
+How to START / RUN the project is in RUNNING_NOTES.txt.
+Last updated 26-11-2026.
+
+
+#######################################################################################
+#  A. WHAT "AGENTS" ARE IN THIS PROJECT?                                               #
+#######################################################################################
+
+There are NO external agents and NO paid cloud AI services. Everything runs on this laptop
+and is free. The project is one app made of these parts:
+
+Part                     What it is                                 Port / place
+-----------------------  -----------------------------------------  -------------------------
+frontend                 the dashboard (Next.js) you use in Chrome   http://localhost:3000
+backend                  the brain (NestJS): API, job queue,         :4000
+                         approval rules, publishing
+PostgreSQL               database (stories, characters, prompts,     :5432
+                         versions, approvals...)
+Redis                    job queue (BullMQ): one heavy job at a time :6379
+media-service            images, voices, video editing (Python)      :8000
+reference-service        reads reference reels (Agent Reach,         :8100
+                         yt-dlp) for style research only
+Ollama                   local AI that writes (qwen2.5:7b) and       :11434
+                         looks at pictures (qwen2.5vl:3b)
+ComfyUI                  local AI that draws pictures (DreamShaper   :8188
+                         SD 1.5 + IP-Adapter) and, from Phase 4,
+                         animates them (AnimateDiff)
+Kokoro TTS               local AI voices (Hindi + English)           inside media-service
+faster-whisper           speech-to-text for subtitle timing          inside media-service
+FFmpeg                   cuts, camera motion, music mix, final MP4   inside media-service
+
+The only "agent-like" tool is Agent Reach: it studies reference videos you add in the
+Reference Library. It does NOT make reels.
+
+Why it is slow: everything runs on the laptop CPU (no NVIDIA graphics card), and 16 GB RAM
+holds only one AI model at a time, so the jobs run one after another.
+A 1-minute reel takes about 1-1.5 hours. 5 reels a day = an overnight batch.
+
+
+#######################################################################################
+#  B. THE PROCESS: AI DOES EVERYTHING, I ONLY REVIEW AND UPLOAD                        #
+#######################################################################################
+
+  1. Settings -> Schedule: turn ON, set 5 reels per day and a start time (e.g. 01:00).
+     (Or make one reel now: Content Studio -> "Generate reel".)
+  2. The AI makes the reels on its own (section C).
+  3. In the morning: Review Studio -> watch each reel.
+       Approve        -> Publishing Center uploads it (YouTube / Instagram)
+       Reject         -> it is never published
+       Request changes-> the AI rewrites the story and makes a new version
+       Regenerate scene (Review Studio -> Scenes) -> redraws just one bad scene
+  4. NOTHING is ever published without my approval. The backend checks the approval in the
+     database again right before every upload. A changed video needs a new approval.
+
+TWO WAYS TO MAKE THE VIDEO PART (chosen 26-11-2026: Google Flow for real quality)
+  Google Flow (recommended)  ReelForge writes the story, characters and one Veo prompt per
+                             scene; I make each 8 s clip in Google Flow (my account, no extra
+                             cost) and upload it; ReelForge assembles, adds music + subtitles,
+                             checks, review, publish. Real animation + natural Hindi voices.
+                             Step by step: RUNNING_NOTES.txt section 3a.
+  Fully local (fallback)     Everything automatic on this laptop, but only still pictures with
+                             camera motion and robotic Kokoro voices. Far below Flow quality.
+  Why not automatic Flow: Flow has no public API. The paid Veo API could automate it later.
+
+Story source (Content Studio, top of the page):
+  AI story       the AI picks and writes the story itself (used by the daily schedule)
+  My idea        I give a premise, the AI writes the full story
+  My full story  I paste a whole story, the AI keeps what happens and only splits it into scenes
+  Next episode   continues an earlier story with the same characters
+Audience: 1-3 / 4-6 / 7-10 years / general (changes words, speed and emotional depth).
+
+
+#######################################################################################
+#  C. HOW ONE VIDEO IS GENERATED, STEP BY STEP                                         #
+#######################################################################################
+
+ Step  What happens                                                Done by         ~Time
+ ----  ----------------------------------------------------------  --------------  ---------
+  1    PICK THE STORY: the AI invents a fresh premise for the       Ollama          1-2 min
+       category and checks it is not a repeat of recent stories
+       (skipped for "My idea" / "My full story")
+  2    UNDERSTAND THE STORY: "story bible" = characters,            Ollama          ~5 min
+       personalities, relationships, places, objects, events in
+       order, emotions, moral. Mythology/history kept faithful.
+  3    CHARACTERS: existing characters are reused (never           Ollama          1-2 min
+       redesigned). New ones are designed ONCE and saved for ever:       each
+       looks, colours, clothing, accessories, voice, and prompts
+       for 6 reference views. The design is checked against the
+       story ("golden fluffy fur") and fixed if details are missing.
+  4    SCRIPT: scenes of ~8 seconds, narration + dialogue in        Ollama          ~10 min
+       Hindi/English, title, captions, hashtags. Checked: long
+       enough, follows the story bible, no invented characters.
+  5    SCENE PROMPTS: for every scene a detailed prompt: action,   Ollama          2-4 min
+       body movement, face, camera, place, light, continuity with                   per scene
+       the scenes before/after. Scored for quality; weak ones are
+       improved automatically. Viewable/editable in Prompt Studio.
+  6    PRODUCE: makes the master picture of any character that      ComfyUI         ~3 min
+       has none, then splits the reel into one job per scene.                       each
+  7    SCENE JOBS (one per scene, independent):                    ComfyUI,        ~4-5 min
+         - keyframe picture (characters from their reference      Kokoro          per scene
+           pictures, so they look the same in every scene)
+         - voices for every line (each character its own voice)
+         - AI animation clip (from Phase 4, when switched on)                      +15-30 min
+       Finished scenes are saved: a crash or restart continues                     per clip
+       from where it stopped.
+  8    MERGE (starts when all scenes are done): scene timing from   FFmpeg          ~5 min
+       the voices, camera motion for still scenes, music + sound
+       effects, subtitles, transitions -> 1080x1920 MP4.
+  9    CHECK: resolution, audio, length, black frames; labels the   FFmpeg          <1 min
+       reel "Not AI-animated" if scenes are still pictures.
+ 10    REVIEW STUDIO: waits for me (approve / reject / changes /    me
+       regenerate one scene). Time taken per scene is shown under
+       Review Studio -> Scenes.
+
+Where to look while it runs: Generation Progress (left menu), Overview (activity feed).
+Where prompts are: Prompt Studio. Where characters are: Character Studio.
+
+
+1. WRITING MY OWN STORY
+-----------------------
+Status: BUILT (26-11-2026). Content Studio -> "Story source":
+  AI story | My idea | My full story | Next episode
+  plus Audience (1-3 / 4-6 / 7-10 / general). "My full story" keeps what happens unchanged.
+  Results, story bible and scene prompts: Prompt Studio (left menu).
+
+Original note (25-11-2026), kept for history:
+Status: NOT supported yet.
+Today the story generator only takes a category, a language and optional references.
+The AI invents the story; you can only edit the narration afterwards (Review Studio /
+Content Studio -> Edit script).
+
+Planned: a "Write my story" mode in Content Studio with two options:
+  - Use my text as-is : you paste the full story; the AI only splits it into scenes,
+                        image prompts, sound effects and captions. Your words stay unchanged.
+  - Polish my idea    : you give a premise or a scene outline; the AI writes the full script.
+Both feed the same pipeline as today: storyboard -> voice -> render -> Review Studio.
+
+
+2. CHOOSING CHARACTERS
+----------------------
+About the Kahani page (aivnora.web.app/kahani.html):
+  It is a static how-to guide, not an app. It has no character picker. Characters are
+  just named in a text outline ("who - where - what is happening"). It has no
+  per-character voices and says outright it has no lip-sync.
+  Worth copying: its 5 visual style presets - Shadow Puppet, Madhubani folk, Chibi,
+  Painterly, Stick-figure. These suit mythology and history stories.
+
+Today the cast is fixed to the characters in Character Studio (Rabbit and Squirrel).
+
+Planned:
+  - Character collections in Character Studio, e.g. Kids, Ramayan, Mahabharat,
+    Chhatrapati Shivaji Maharaj. Each character keeps its own reference images,
+    appearance prompt and voice.
+  - Cast picker when creating a story: choose a collection, tick the characters,
+    mark the narrator and the main character.
+  - Style presets per story or per collection.
+
+Note: deities and historical figures need careful prompts (traditional iconography,
+respectful depiction). These guidelines will be written into each collection.
+
+
+3. VOICES AND LIP-SYNC
+----------------------
+Per-character voices: ALREADY WORK.
+  Each dialogue line is spoken in that character's voice profile; narration uses the
+  narrator voice. Engine: Kokoro TTS (English + a few Hindi voices).
+
+Your own voice (voice cloning): possible for free, BUT most free cloning models are
+  licensed for non-commercial use only. Matters if the app will be sold.
+
+Lip-sync: NOT built.
+  - Open-source options (Wav2Lip, SadTalker, LivePortrait) are built for human faces
+    and do poorly on cartoon animals.
+  - On this CPU-only laptop they take many minutes per second of video.
+  - Several have non-commercial licences.
+  Advice: skip lip-sync until there is an NVIDIA GPU. Until then, a cheap substitute is
+  a "talking" effect - a gentle zoom/pulse on whichever character is speaking.
+
+
+4. WHAT IS INTEGRATED
+---------------------
+These are local models and tools run by the pipeline in a fixed order (stages), not
+autonomous agents.
+
+Job                                   Tool / model                                Cost
+------------------------------------  ------------------------------------------  ----------------
+Story, script, reference analysis     Ollama - qwen2.5:7b-instruct                Free, local
+Reading reference video frames        Ollama - qwen2.5vl:3b (vision)              Free, local
+Reference extraction                  Agent Reach 1.6.1 + yt-dlp                  Free
+Character and scene images            ComfyUI - DreamShaper 8 + LCM-LoRA          Free, local
+                                      + IP-Adapter (character consistency)
+Voices                                Kokoro TTS                                  Free, local
+Transcription, subtitle timing        faster-whisper                              Free, local
+Editing, camera motion, render,       FFmpeg                                      Free
+validation
+Publishing                            YouTube Data API v3, Instagram Graph API    Free (official)
+Built but OFF                         Claude (text), Higgsfield,                  Paid / needs GPU
+                                      ComfyUI image-to-video (needs GPU)
+
+
+5. "HOW MANY TOKENS PER DAY?"
+-----------------------------
+Local models have NO token limit and NO per-token cost. The only limit is the
+laptop's time (and electricity).
+
+  - Measured: about 1 hour per reel, mostly image generation (~5 min per image).
+  - 5 reels per day = ~5 hours -> works as an overnight batch.
+  - About 10 reels per day is this laptop's ceiling.
+
+More reels later:
+  - Add an NVIDIA GPU (e.g. RTX 3060 12 GB): images drop from ~5 minutes to seconds,
+    20-50 reels/day becomes realistic, and lip-sync / real animation become possible.
+  - Or add a second machine as a worker - the job queue (BullMQ) already supports it.
+
+
+6. SELLING THE APP AND GIVING DEMOS
+-----------------------------------
+Today it is a single-user app that runs on your own PC. Two ways to sell it:
+
+A. Self-hosted (buyer runs it on their own PC)
+   - Their models are free; no running costs for you.
+   - They need decent hardware and their own Google and Meta app setup (as done here).
+   - Least work.
+
+B. Hosted SaaS (you run it for customers)
+   - Models are still free to use, but YOU pay for GPU servers.
+   - Needs: multiple users/workspaces, per-customer social accounts, billing and
+     usage quotas.
+   - Google must verify the app before other people can use the YouTube upload scope.
+   - Meta requires App Review + business verification before publishing to other
+     people's Instagram accounts.
+
+Licence check needed before selling:
+   - Appear fine for commercial use: Kokoro, faster-whisper, DreamShaper.
+   - Need verifying: the 3B vision model's licence may be research-only.
+   - Downloading Instagram reels with yt-dlp breaks Instagram's terms - a risk in a
+     paid product.
+
+Demo: a hosted demo instance with sample reels and publishing disabled, plus a
+2-minute screen recording.
+
+
+7. PAID PROVIDERS FOR BUYERS (LATER / SECONDARY)
+------------------------------------------------
+The provider system already supports this: each capability (text, image, voice,
+video) is a plug-in that can be switched on in Settings -> AI providers.
+For buyers, use "bring your own API key": they enter their own keys for paid services
+(e.g. Claude, ElevenLabs, Kling), pay the provider directly, and your cost stays zero.
+
+
+8. SLOW REFERENCE LIBRARY
+-------------------------
+Could not reproduce yet: the page and backend answered in under 0.2 s, but the
+media and reference services were not running at the time.
+Likely causes:
+  - Frontend runs in dev mode (npm run dev): each page is compiled on first visit.
+  - Laptop swapping RAM while ComfyUI is running.
+  - The health check every 15 s starts Agent Reach + FFmpeg processes each time.
+Next step: start everything, open the page, note which part is slow (the list, or
+opening one reference), then measure and fix.
+
+
+SUGGESTED BUILD ORDER
+---------------------
+1. "Write my story" (use-as-is and polish modes).
+2. Character collections + cast picker + style presets
+   (makes Ramayan, Mahabharat and Shivaji Maharaj stories possible).
+3. Reference Library speed fix.
+4. Music / SFX library (storage/library/music and storage/library/sfx are empty today,
+   so reels render without background music).
+5. Later: GPU -> lip-sync and real animation -> multi-user and selling work.

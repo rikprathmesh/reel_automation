@@ -1,8 +1,16 @@
 REELFORGE AI - HOW TO RUN (local notes)
 =======================================
-Last updated: 24-11-2026. All 9 phases are implemented; see README.md for status
-and what still needs your accounts (YouTube / Instagram) before publishing works.
+Last updated: 26-11-2026. How the app works (parts, process, step by step): FEATURE_QA_NOTES.txt
+See README.md for what still needs your accounts (YouTube / Instagram) before publishing works.
 
+
+
+Option A: one command, recommended
+Open PowerShell and run:
+
+cd D:\reel-creator-automation
+powershell -ExecutionPolicy Bypass -File scripts\start-all.ps1
+-------------------------------------------------------------------------
 
 1. QUICK START (every time)
 ---------------------------
@@ -48,13 +56,71 @@ frontend:           cd D:\reel-creator-automation\frontend
 3. MAKING A REEL
 ----------------
 
-Content Studio -> pick category + language -> "Generate reel".
-On this CPU-only laptop one reel takes roughly 1 hour (story ~10 min, each image ~6 min,
-voices, motion, render). Jobs run one at a time on purpose (16 GB RAM).
-Finished reels appear in Review Studio. Approve -> Publishing Center. Nothing is ever
-published without your approval; rejected reels are never published.
+Fully automatic (normal way):
+  Settings -> Schedule -> ON, 5 reels per day, start time 01:00. The AI picks the stories,
+  writes them, designs characters, makes pictures, voices and video. It only CREATES reels;
+  it never publishes.
 
-Daily automation: Settings -> Schedule (OFF by default). It only CREATES reels overnight.
+One reel now:
+  Content Studio -> Story source (AI story / My idea / My full story / Next episode)
+  -> category, language, audience, length, style -> "Generate reel".
+  ("Story + prompts" makes only the story and scene prompts, no video.)
+
+What happens step by step, and how long each step takes: FEATURE_QA_NOTES.txt section C.
+On this CPU-only laptop one 1-minute reel takes about 1-1.5 hours. Jobs run one at a time
+on purpose (16 GB RAM). Follow it in Generation Progress / Overview.
+
+Then:
+  Review Studio  -> watch -> Approve / Reject / Request changes.
+                    Scenes tab: see each scene and the time it took; "Regenerate scene"
+                    redraws only that scene (makes a new version that needs approval).
+  Prompt Studio  -> story bible, characters, and every scene's prompt (view, edit,
+                    regenerate, improve, shorten, expand). Optional.
+  Publishing Center -> uploads only approved reels.
+Nothing is ever published without your approval; rejected reels are never published.
+
+
+3a. MAKING A REEL WITH GOOGLE FLOW (best quality, the recommended way, decided 26-11-2026)
+---------------------------------------------------------------------------------------
+Why: this laptop (no graphics card) can only make still pictures + robotic voices. Google Flow
+(Veo) makes real animation with natural Hindi voices. Flow has no API, so ONE step is manual.
+
+  1. Content Studio -> "Story + prompts" (AI story, My idea or My full story). Wait ~40-60 min.
+  2. Prompt Studio -> pick the story -> tab "Google Flow".
+  3. In Flow, once per character: make its image with "Character image prompt for Flow"
+     (or download the picture shown) and add it as an INGREDIENT.
+  4. For each scene: "Copy prompt" -> paste in Flow -> generate a VERTICAL clip with the
+     character ingredients -> listen to it (Hindi can vary; regenerate if a line sounds wrong)
+     -> download -> "Upload Flow clip" on that scene.
+     If a scene says "make 2 clips", split its lines into two Flow clips (or shorten them).
+  5. "Assemble reel": clips in order, their own Veo voices and sounds, ONE music track under the
+     whole reel (from storage\library\music), Hindi subtitles from the script, checks.
+  6. Review Studio -> watch -> Approve -> Publishing Center.
+Scenes without a clip are made locally (picture + local voice) so you can mix both.
+The Veo prompt tells Flow: no background music (ReelForge adds one continuous track) and
+no on-screen text (ReelForge adds subtitles).
+
+
+3b. ADDING MUSIC & SOUND EFFECTS (one time, by hand, free)
+----------------------------------------------------------
+Without files here, reels are made WITHOUT music (they still work).
+Download by hand in the browser (the sites don't allow automatic downloads):
+  Music: OpenGameArt packs marked "CC0", e.g.
+           https://opengameart.org/content/adventure-chiptunes-collection
+           https://opengameart.org/content/music-pack-1
+           https://opengameart.org/content/cc0-music-1
+         or public-domain classical recordings (Wikimedia Commons / Musopen)
+  SFX:   Kenney audio packs (CC0)  https://kenney.nl/assets/category:Audio
+         BigSoundBank (CC0)        https://bigsoundbank.com
+Avoid: Kevin MacLeod/incompetech (copyright claims), YouTube Audio Library (not allowed on
+Instagram), MusicGen AI music (non-commercial licence).
+
+Put them here, with words in the file name (the app picks files by those words):
+  storage\library\music\   e.g. gentle_bedtime_soft_flute.mp3, adventure_exciting_upbeat.mp3,
+                                happy_playful_kids.mp3, devotional_calm_peaceful.mp3
+  storage\library\sfx\     e.g. footsteps_walk.wav, birds_jungle_ambience.wav,
+                                whoosh_swoosh_transition.wav, magic_sparkle.wav
+Keep each pack's licence file next to it.
 
 
 4. TAKE CARE (important)
@@ -90,6 +156,14 @@ Tip: schedule backup.ps1 daily in Windows Task Scheduler.
 Problem                                   Fix
 ----------------------------------------  -----------------------------------------------
 "Backend not reachable" in the browser    Start the backend window (or start-all.ps1)
+New code/fixes "don't work", old errors   TWO backends are running: the old one keeps port 4000 and
+  keep coming back                        serves old code. Close ALL "ReelForge - backend" windows,
+                                          then start ONE (start-all.ps1, or in backend\:
+                                          npm run build ; npm start). Run only one at a time; don't
+                                          mix "npm run dev" with "npm start". (Happened 26-11-2026.)
+After changing backend code               Close the backend window and start it again (build + start).
+                                          Don't do this while a reel is being made: the reel's job
+                                          is interrupted (it resumes, but loses time).
 redis ECONNREFUSED 127.0.0.1:6379         Start Redis
 llm: missing models                       ollama pull qwen2.5:7b-instruct ; ollama pull qwen2.5vl:3b
 media / ComfyUI "unreachable"             Start ComfyUI and media-service
@@ -110,3 +184,135 @@ Generated media .... D:\reel-creator-automation\storage
 AI models .......... D:\ai-models  (ollama, ComfyUI\models, hf)
 Redis .............. D:\tools\redis   (data: D:\tools\redis-data)
 Backups ............ D:\reelforge-backups
+
+
+8. INSTAGRAM PUBLISHING SETUP (Meta app) - done once
+----------------------------------------------------
+
+Account used:  Instagram @toontales.official_1207 (Professional account, linked to the
+               Toon Tales Facebook Page). Meta app: "ToonTales Publisher",
+               App ID 1577113481127120, App type Business, App mode Development.
+Docs:          https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-facebook-login/business-login-for-instagram
+
+A) Instagram app (phone)
+   1. Settings > Account type and tools > Switch to professional account (Creator/Business).
+   2. Edit profile > Page > connect the Toon Tales Facebook Page.
+      (The Facebook account must have full control of that Page.)
+
+B) Meta developer dashboard  (https://developers.facebook.com > My Apps > ToonTales Publisher)
+   1. Products > Instagram > "API setup with Facebook login"   (already added)
+   2. Add Product > "Facebook Login for Business" > Set Up       (already added)
+   3. Facebook Login for Business > Settings:
+        Client OAuth login ............ Yes
+        Web OAuth login ............... Yes
+        Use Strict Mode for redirect .. Yes
+        Valid OAuth Redirect URIs ..... http://localhost:3000/settings/instagram-callback
+      -> click "Save changes".
+   4. App roles: the ONLY Administrator must be the Facebook account that owns the
+      Toon Tales Page (the same account you log in with when connecting). In Development
+      mode, other accounts cannot connect, and an account without the Page sees
+      "You don't have any Pages".
+   5. Keep App Mode = Development. Standard Access is enough for your own account;
+      App Review, Webhooks and "Configurations" are NOT needed.
+
+C) Put the app keys in backend\.env   (App settings > Basic in the Meta dashboard)
+        META_APP_ID=1577113481127120
+        META_APP_SECRET=<click "Show" next to App secret, copy the 32 characters>
+        IG_GRAPH_VERSION=v27.0
+   - The App Secret is a password: never share it, never put it in chat/screenshots/git.
+   - Restart the backend after editing .env.
+
+D) Connect inside ReelForge
+   1. http://localhost:3000 > Settings > Social accounts > "Connect with Facebook Login".
+   2. Facebook opens: log in with the account that manages the Toon Tales Page,
+      choose the Toon Tales Page + @toontales.official_1207, keep all permissions ON.
+   3. Meta redirects back to  http://localhost:3000/settings/instagram-callback
+      ReelForge reads the token from that page, removes it from the address bar,
+      checks it belongs to the ToonTales Publisher app, and stores it encrypted.
+   4. You return to Settings showing "Instagram connected".
+
+E) Good to know
+   - The token lasts about 60 days. When Settings shows it expired, click Connect again.
+   - Instagram allows max ~100 API posts per 24 h (we post far fewer).
+   - Permissions requested: instagram_basic, instagram_content_publish,
+     pages_read_engagement, pages_show_list, instagram_manage_insights.
+   - If Facebook asks for "Page Publishing Authorization" on the Page, complete it,
+     otherwise publishing is refused.
+   - Fallback without the redirect: Meta Graph API Explorer > select ToonTales Publisher >
+     add the permissions above > Generate Access Token > paste it in
+     Settings > Social accounts > "Instagram Graph API access token" > Connect.
+   - Without a connection, approved reels wait in Publishing Center > "Needs attention",
+     where you can download, post manually and record the URL.
+
+F) If connecting fails (fixed 25-11-2026)
+   - The callback page now shows Meta's real error instead of "Internal server error".
+   - "This login did not grant access to any Facebook Page or Instagram account":
+       Facebook > Settings & privacy > Settings > Business integrations > ToonTales Publisher >
+       View and edit > turn ON the Toon Tales Page and @toontales.official_1207 > Save.
+       (Or Remove the app there, so the next Connect shows the full Page picker.)
+       Then click Connect again in ReelForge.
+   - Pages managed through a Business portfolio don't show up in Meta's Page list; ReelForge
+     now reads the granted Instagram account straight from the login token, so this works.
+   - After any backend code change: npm run build, then npm start (see 1. QUICK START).
+
+
+9. YOUTUBE PUBLISHING SETUP (Google Cloud) - done once
+------------------------------------------------------
+
+Account used:  Google Cloud project "my dummy login google" (Project ID tidal-fiber-363423).
+               OAuth client: "ReelForge local" (Web application). App status: Testing.
+               (An empty project "ReelForge" was also created - unused, can be deleted.)
+Console:       https://console.cloud.google.com  (check the project name in the top bar)
+
+A) Enable the API
+   APIs & Services > Library > "YouTube Data API v3" > Enable.          (done)
+
+B) Google Auth Platform  (left menu; older consoles call it "OAuth consent screen")
+   1. Branding: app name ReelForge, support email + developer email = your Gmail.
+   2. Audience: User type External, Publishing status Testing.
+      Test users > Add users > the Gmail that OWNS the YouTube channel.
+      (Only test users can connect while the app is in Testing.)
+   3. Data access > Add or remove scopes > "Manually add scopes":
+        https://www.googleapis.com/auth/youtube.upload
+        https://www.googleapis.com/auth/youtube.readonly
+      > Add to table > Update > Save.
+
+C) Create the OAuth client
+   Clients > Create client:
+        Application type ............... Web application
+        Name ........................... ReelForge local
+        Authorised JavaScript origins .. LEAVE EMPTY  (a URL with a path here gives
+                                         "Invalid origin: URIs must not contain a path")
+        Authorised redirect URIs ....... http://localhost:3000/api/oauth/youtube/callback
+        "Use this client for an AI-powered agent" ... leave UNTICKED
+   > Create. The popup shows Client ID + Client secret (or "Download JSON").
+   New settings can take 5 minutes to a few hours to take effect.
+
+D) Put the keys in backend\.env
+        GOOGLE_CLIENT_ID=<...>.apps.googleusercontent.com
+        GOOGLE_CLIENT_SECRET=GOCSPX-<...>
+   - Taken from the downloaded client_secret_*.json. Keep that JSON out of git:
+     client_secret*.json is in .gitignore. Better: delete it once the keys are in .env.
+   - The Client secret is a password: never share it, never put it in chat/screenshots/git.
+   - Restart the backend after editing .env (no rebuild needed for .env changes).
+
+E) Connect inside ReelForge
+   1. http://localhost:3000 > Settings > Social accounts > YouTube Shorts > Connect.
+   2. Sign in with the test-user Gmail that owns the channel.
+   3. "Google hasn't verified this app" > Continue (expected while in Testing).
+   4. Tick both YouTube permissions > Continue.
+   5. You return to Settings showing YouTube connected.
+
+F) Good to know
+   - Testing mode: the connection expires after 7 days -> click Connect again weekly.
+     To stop that: Google Auth Platform > Audience > "Publish app" (In production).
+     For personal use this works without Google's verification; the warning screen stays.
+   - Quota: 10,000 units/day free; one upload costs ~1,600 -> about 6 uploads per day.
+   - Default upload privacy comes from Settings > Generation > YouTube privacy
+     (private by default). Use private/unlisted for the first test upload.
+   - Common errors:
+       redirect_uri_mismatch ... redirect URI in Google Cloud must be exactly
+                                 http://localhost:3000/api/oauth/youtube/callback
+                                 (or wait a few minutes after changing it)
+       access_denied / 403 ..... the Gmail is not in Audience > Test users, or the
+                                 scopes in B3 are missing

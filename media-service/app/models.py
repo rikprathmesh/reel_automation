@@ -21,6 +21,8 @@ class ComfyStatus(BaseModel):
     url: str
     detail: str
     workflows: list[str]
+    # workflows whose node classes and model files are all present in ComfyUI (can actually run)
+    runnable: list[str] = []
 
 
 class TTSStatus(BaseModel):
@@ -83,6 +85,7 @@ class ImageRequest(BaseModel):
     prompt: str = Field(min_length=1)
     negative_prompt: str | None = None
     reference_keys: list[str] = []
+    ref_weight: float | None = Field(None, ge=0, le=1)
     seed: int = 0
     width: int = Field(1080, ge=256, le=4096)
     height: int = Field(1920, ge=256, le=4096)
@@ -91,7 +94,7 @@ class ImageRequest(BaseModel):
 
 class ImageResponse(BaseModel):
     key: str
-    workflow: Literal["txt2img", "txt2img_ref"]
+    workflow: Literal["txt2img", "txt2img_ref", "txt2img_regional"]
 
 
 # --- animate ---
@@ -100,13 +103,32 @@ class AnimateRequest(BaseModel):
     duration: float = Field(gt=0, le=120)
     camera: Camera = "static"
     prompt: str = ""
-    mode: Literal["kenburns", "comfyui"] = "kenburns"
+    mode: Literal["kenburns", "comfyui", "animatediff"] = "kenburns"
     out_key: str
+    # animatediff only: character reference images (IP-Adapter), negative prompt, seed
+    negative_prompt: str = ""
+    reference_keys: list[str] = []
+    ref_weight: float | None = None
+    seed: int = 0
+
+
+class ClipAssetsRequest(BaseModel):
+    video_key: str
+    out_prefix: str
+
+
+class ClipAssetsResponse(BaseModel):
+    duration: float
+    has_audio: bool
+    audio_key: str | None
+    frame_key: str
 
 
 class AnimateResponse(BaseModel):
     key: str
-    mode: Literal["kenburns", "comfyui"]
+    mode: Literal["kenburns", "comfyui", "animatediff"]
+    # seconds of real AI motion in the clip (the rest holds the last frame); 0 for camera motion
+    motion_sec: float = 0.0
 
 
 # --- library ---

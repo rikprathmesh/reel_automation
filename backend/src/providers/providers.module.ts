@@ -36,6 +36,7 @@ export class ProviderRegistry {
     this.register("text", new OllamaTextProvider(config.get("OLLAMA_URL", { infer: true }), config.get("OLLAMA_TEXT_MODEL", { infer: true }), config.get("OLLAMA_VISION_MODEL", { infer: true })));
     this.register("image", new ComfyImageProvider(media));
     this.register("video", new MediaVideoProvider(media, "kenburns"));
+    this.register("video", new MediaVideoProvider(media, "animatediff"));
     this.register("video", new MediaVideoProvider(media, "comfyui"));
     this.register("voice", new MediaVoiceProvider(media));
     this.register("transcription", new WhisperTranscriptionProvider(media));
@@ -57,6 +58,13 @@ export class ProviderRegistry {
 
   async get<C extends Capability>(cap: C): Promise<CapabilityMap[C]> {
     const id = (await this.currentSelection())[cap];
+    const p = this.providers.get(cap)?.get(id);
+    if (!p) throw new Error(`No ${cap} provider "${id}" is registered`);
+    return p as CapabilityMap[C];
+  }
+
+  /** A specific registered provider regardless of the selection (e.g. Ken Burns for scenes without an AI clip). */
+  registered<C extends Capability>(cap: C, id: string): CapabilityMap[C] {
     const p = this.providers.get(cap)?.get(id);
     if (!p) throw new Error(`No ${cap} provider "${id}" is registered`);
     return p as CapabilityMap[C];

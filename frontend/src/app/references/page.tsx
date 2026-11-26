@@ -18,12 +18,12 @@ import { Textarea } from "@/components/ui/textarea";
 
 const STATUS_STYLE: Record<string, string> = {
   queued: "bg-muted text-muted-foreground",
-  extracting: "bg-sky-500/15 text-sky-300",
-  extracted: "bg-sky-500/15 text-sky-300",
-  analyzing: "bg-violet-500/15 text-violet-300",
-  analyzed: "bg-emerald-500/15 text-emerald-300",
-  needs_upload: "bg-amber-500/15 text-amber-300",
-  failed: "bg-red-500/15 text-red-300",
+  extracting: "bg-sky-500/15 text-sky-600 dark:text-sky-300",
+  extracted: "bg-sky-500/15 text-sky-600 dark:text-sky-300",
+  analyzing: "bg-violet-500/15 text-violet-600 dark:text-violet-300",
+  analyzed: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300",
+  needs_upload: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+  failed: "bg-red-500/15 text-red-600 dark:text-red-300",
 };
 const BUSY = new Set(["queued", "extracting", "extracted", "analyzing"]);
 
@@ -113,7 +113,7 @@ function ReferenceCard({ r, onOpen, i }: { r: Reference; onOpen: () => void; i: 
             </div>
           </div>
           {r.analysis?.summary && <p className="line-clamp-3 text-xs text-muted-foreground">{r.analysis.summary}</p>}
-          {failed && r.error && <p className="rounded-md bg-red-500/10 p-2 text-xs text-red-300">{r.error}</p>}
+          {failed && r.error && <p className="rounded-md bg-red-500/10 p-2 text-xs text-red-600 dark:text-red-300">{r.error}</p>}
           {r.status === "queued" && <p className="text-xs text-muted-foreground">Waiting for the reference service (built in Phase 4).</p>}
           <div className="mt-auto flex flex-wrap gap-1.5">
             {r.status === "analyzed" && <Button size="sm" variant="secondary" onClick={onOpen}>View analysis</Button>}
@@ -128,7 +128,7 @@ function ReferenceCard({ r, onOpen, i }: { r: Reference; onOpen: () => void; i: 
               </>
             )}
             {!BUSY.has(r.status) && <Button size="sm" variant="ghost" disabled={busy} onClick={() => act(() => api.post(`/references/${r.id}/analyze`), "Re-analysis queued")}><RefreshCw /> Re-run</Button>}
-            <Button size="sm" variant="ghost" className="text-red-400" disabled={busy} aria-label="Delete reference"
+            <Button size="sm" variant="ghost" className="text-red-600 dark:text-red-400" disabled={busy} aria-label="Delete reference"
               onClick={() => { if (confirm("Remove this reference?")) void act(() => api.del(`/references/${r.id}`), "Reference removed"); }}><Trash2 /></Button>
           </div>
         </CardContent>
@@ -188,7 +188,7 @@ export default function ReferencesPage() {
     <>
       <PageHeader title="Reference Library" description="Reference reels and what makes them work." actions={<div className="w-56"><CategorySelect value={category} onChange={setCategory} allowAll /></div>} />
       <AddReferences />
-      {refs.isError && <p className="text-sm text-red-400">{errMsg(refs.error)}</p>}
+      {refs.isError && <p className="text-sm text-red-600 dark:text-red-400">{errMsg(refs.error)}</p>}
       {refs.isPending && <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{Array.from({ length: 3 }, (_, i) => <Skeleton key={i} className="h-40" />)}</div>}
       {refs.data && list.length === 0 && <Card><CardContent className="py-12 text-center text-sm text-muted-foreground">No references{category ? " in this category" : ""} yet.</CardContent></Card>}
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">

@@ -7,7 +7,7 @@ import type { ServiceClient } from "./service-client.ts";
 /** Shape of media-service GET /health (Python, snake_case). */
 export interface MediaHealth {
   ffmpeg: boolean;
-  comfyui: { ok: boolean; detail: string; workflows: string[] };
+  comfyui: { ok: boolean; detail: string; workflows: string[]; runnable?: string[] };
   tts: { kokoro: boolean; piper: boolean };
   whisper: { ok: boolean; model: string };
 }
@@ -21,7 +21,7 @@ export class ComfyImageProvider implements ImageGenerationProvider {
   constructor(private readonly media: ServiceClient) {}
   generate(r: ImageRequest) {
     return this.media.call<{ key: string; workflow: string }>("/image", {
-      prompt: r.prompt, negative_prompt: r.negativePrompt, reference_keys: r.referenceKeys, seed: r.seed, width: r.width, height: r.height, out_key: r.outKey,
+      prompt: r.prompt, negative_prompt: r.negativePrompt, reference_keys: r.referenceKeys, seed: r.seed, width: r.width, height: r.height, out_key: r.outKey, ref_weight: r.referenceWeight,
     });
   }
   async health(): Promise<ProviderHealth> {
@@ -31,24 +31,36 @@ export class ComfyImageProvider implements ImageGenerationProvider {
   }
 }
 
-/** Camera-motion animation of stills (FFmpeg). "comfyui" mode would use an img2vid workflow on GPU hardware. */
+/**
+ * Scene video. "kenburns" = camera motion over the still (FFmpeg, NOT AI animation); "animatediff" = real AI motion
+ * (AnimateDiff v3 + LCM on SD1.5, runs on this CPU, slowly); "comfyui" = Stable Video Diffusion (needs an NVIDIA GPU).
+ */
 export class MediaVideoProvider implements VideoGenerationProvider {
   readonly info: ProviderInfo;
-  constructor(private readonly media: ServiceClient, private readonly mode: "kenburns" | "comfyui") {
-    this.info = mode === "kenburns"
-      ? { id: "kenburns", label: "Cinematic camera motion (FFmpeg, local)", capability: "video", paid: false, local: true }
-      : { id: "comfyui-img2vid", label: "ComfyUI image-to-video (needs NVIDIA GPU)", capability: "video", paid: false, local: true };
+  constructor(private readonly media: ServiceClient, private readonly mode: "kenburns" | "comfyui" | "animatediff") {
+    this.info = {
+      kenburns: { id: "kenburns", label: "Camera motion over still pictures (FFmpeg, NOT AI animation)", capability: "video" as const, paid: false, local: true },
+      animatediff: { id: "animatediff-lcm", label: "AnimateDiff real AI animation (local CPU, slow: ~2 s of motion per scene)", capability: "video" as const, paid: false, local: true },
+      comfyui: { id: "comfyui-img2vid", label: "ComfyUI image-to-video SVD (needs NVIDIA GPU)", capability: "video" as const, paid: false, local: true },
+    }[mode];
   }
-  animate(r: AnimateRequest) {
-    return this.media.call<{ key: string; mode: string }>("/animate", {
+  async animate(r: AnimateRequest) {
+    const res = await this.media.call<{ key: string; mode: string; motion_sec?: number }>("/animate", {
       image_key: r.imageKey, duration: r.durationSec, camera: r.camera, prompt: r.prompt, mode: this.mode, out_key: r.outKey,
-    });
+      negative_prompt: r.negativePrompt ?? "", reference_keys: r.referenceKeys ?? [], ref_weight: r.referenceWeight, seed: r.seed ?? 0,
+    }, 3 * 60 * 60_000);
+    return { key: res.key, mode: res.mode, motionSec: res.motion_sec ?? 0 };
   }
   async health(): Promise<ProviderHealth> {
     const h = await mediaHealth(this.media);
     if ("error" in h) return { ok: false, detail: h.error };
     if (this.mode === "kenburns") return { ok: h.ffmpeg, detail: h.ffmpeg ? "FFmpeg ready" : "FFmpeg missing in media-service" };
-    return { ok: h.comfyui.ok && h.comfyui.workflows.includes("img2vid"), detail: h.comfyui.workflows.includes("img2vid") ? h.comfyui.detail : "img2vid workflow not installed" };
+    if (this.mode === "animatediff") {
+      const ok = h.comfyui.ok && (h.comfyui.runnable ?? []).includes("animatediff");
+      return { ok, detail: ok ? `${h.comfyui.detail}; AnimateDiff ready` : "AnimateDiff not runnable: needs ComfyUI-AnimateDiff-Evolved + v3_sd15_mm.ckpt in models/animatediff_models" };
+    }
+    const runnable = (h.comfyui.runnable ?? h.comfyui.workflows).includes("img2vid");
+    return { ok: h.comfyui.ok && runnable, detail: runnable ? h.comfyui.detail : "img2vid not runnable: workflow, nodes or SVD model missing (needs an NVIDIA GPU)" };
   }
 }
 
@@ -116,6 +128,12 @@ export interface RenderValidation {
 
 export class MediaComposer {
   constructor(private readonly media: ServiceClient) {}
+  /** media-service health (ComfyUI workflows installed, TTS engines, ffmpeg); throws when the service is down */
+  async health(): Promise<MediaHealth> {
+    const h = await mediaHealth(this.media);
+    if ("error" in h) throw new Error(h.error);
+    return h;
+  }
   compose(req: { work_key: string; scenes: ComposeScene[]; voices: ComposeVoice[]; music_key: string | null; whoosh_key: string | null; end_card: string; total_sec: number; out_key: string }) {
     return this.media.call<{ key: string; duration: number; validation: RenderValidation }>("/compose", req);
   }
@@ -125,6 +143,10 @@ export class MediaComposer {
   /** Unloads the image model before LLM work (16 GB machine: never hold both in RAM). Best effort. */
   async freeImageModel() {
     try { await this.media.call<{ comfyui_freed: boolean }>("/free", {}, 60_000); } catch { /* media-service down: nothing to free */ }
+  }
+  /** Unpacks a clip made outside ReelForge (Google Flow / Veo): duration, audio track, still frame. */
+  clipAssets(videoKey: string, outPrefix: string) {
+    return this.media.call<{ duration: number; has_audio: boolean; audio_key: string | null; frame_key: string }>("/clip-assets", { video_key: videoKey, out_prefix: outPrefix }, 10 * 60_000);
   }
   pickLibrary(kind: "music" | "sfx", query: string, salt: string) {
     return this.media.call<{ key: string | null }>("/library/pick", { kind, query, salt }, 60_000);

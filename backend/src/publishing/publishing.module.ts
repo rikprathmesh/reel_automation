@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { BadRequestException, Body, ConflictException, Controller, Delete, Get, Inject, Injectable, Logger, Module, NotFoundException, Param, ParseUUIDPipe, Post, Query, Res, type OnApplicationBootstrap } from "@nestjs/common";
+import { BadGatewayException, BadRequestException, Body, ConflictException, Controller, Delete, Get, Inject, Injectable, Logger, Module, NotFoundException, Param, ParseUUIDPipe, Post, Query, Res, type OnApplicationBootstrap } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import type { Response } from "express";
 import type { Job } from "bullmq";
@@ -22,6 +22,11 @@ import { checkGate } from "./gate.ts";
 import { Prisma, type Platform } from "../generated/prisma/client.ts";
 
 class GateError extends Error {}
+
+/** Meta API failures are the user's to fix (app setup, missing Page link…): show the real reason, not a generic 500. */
+function metaError(e: unknown): never {
+  throw new BadGatewayException(e instanceof Error ? e.message : String(e));
+}
 
 @Injectable()
 export class PublishingService implements OnApplicationBootstrap {
@@ -290,7 +295,7 @@ class PublishingController {
   @Roles("owner")
   async igLogin(@Body(zod(IgLoginBody)) b: z.infer<typeof IgLoginBody>, @CurrentUser() u: SessionUser) {
     if (!this.svc.consumeState(b.state, "instagram")) throw new BadRequestException("Login session expired or invalid. Click Connect again.");
-    const r = await this.svc.instagram.connectFromLogin(b.longLivedToken.trim());
+    const r = await this.svc.instagram.connectFromLogin(b.longLivedToken.trim()).catch(metaError);
     await this.svc.saveAccount("instagram", r.credentials.igUserId, r.username, r.credentials, ["instagram_basic", "instagram_content_publish", "pages_read_engagement"], r.expiresAt, u.id);
     return { ok: true, username: r.username };
   }
@@ -298,7 +303,7 @@ class PublishingController {
   @Post("publishing/accounts/instagram/token")
   @Roles("owner")
   async igToken(@Body(zod(IgTokenBody)) b: z.infer<typeof IgTokenBody>, @CurrentUser() u: SessionUser) {
-    const r = await this.svc.instagram.connect(b.accessToken.trim(), b.igUserId);
+    const r = await this.svc.instagram.connect(b.accessToken.trim(), b.igUserId).catch(metaError);
     await this.svc.saveAccount("instagram", r.credentials.igUserId, r.username, r.credentials, ["instagram_content_publish"], r.expiresAt, u.id);
     return { ok: true, username: r.username };
   }
