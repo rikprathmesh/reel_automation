@@ -1,0 +1,159 @@
+REELFORGE AI - HOW TO RUN (commands only)
+==========================================
+All commands are for PowerShell on this laptop. Explanations: RUNNING_NOTES.txt.
+Always open PowerShell first, then:  cd D:\reel-creator-automation
+
+
+1. START EVERYTHING (every day)
+-------------------------------
+Before: PostgreSQL starts by itself (Windows service). Open the Ollama app (tray icon).
+
+  powershell -ExecutionPolicy Bypass -File scripts\start-all.ps1
+
+Low on RAM (no picture AI, enough for Google Flow mode):
+  powershell -ExecutionPolicy Bypass -File scripts\start-all.ps1 -NoComfy
+
+Then open in Chrome (wait ~1 minute):
+  http://localhost:3000
+
+Safe to run twice: services that are already running are skipped.
+
+
+2. CHECK THAT EVERYTHING IS RUNNING
+-----------------------------------
+All services in one view:
+  foreach ($p in 3000,4000,8000,8100,8188,6379,5432,11434) { $c = Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1; "{0,-6} {1}" -f $p, $(if ($c) { "running" } else { "DOWN" }) }
+
+  Port   Service
+  3000   frontend (dashboard)
+  4000   backend
+  8000   media-service
+  8100   reference-service
+  8188   ComfyUI
+  6379   Redis
+  5432   PostgreSQL
+  11434  Ollama
+
+Backend health (in Chrome):
+  http://127.0.0.1:4000/api/health
+
+
+3. START ONE SERVICE BY HAND (only if one is down)
+--------------------------------------------------
+One command per service (skips it if already running):
+  powershell -ExecutionPolicy Bypass -File scripts\start-service.ps1 -Name redis
+  powershell -ExecutionPolicy Bypass -File scripts\start-service.ps1 -Name comfyui
+  powershell -ExecutionPolicy Bypass -File scripts\start-service.ps1 -Name media
+  powershell -ExecutionPolicy Bypass -File scripts\start-service.ps1 -Name reference
+
+Backend:
+  cd D:\reel-creator-automation\backend
+  npm run build ; npm start
+
+Frontend:
+  cd D:\reel-creator-automation\frontend
+  npm run dev
+
+Fully by hand (same as the scripts):
+  Redis:              cd D:\tools\redis\Redis-8.10.3-Windows-x64-msys2
+                      .\redis-server.exe reelforge.conf
+  ComfyUI:            cd D:\ai-models\ComfyUI
+                      .\.venv\Scripts\python.exe main.py --cpu --listen 127.0.0.1 --port 8188 --disable-auto-launch
+  reference-service:  cd D:\reel-creator-automation\reference-service
+                      .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8100
+  media-service:      cd D:\reel-creator-automation\media-service
+                      $env:HF_HOME='D:/ai-models/hf'
+                      .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+
+
+4. STOP
+-------
+Easiest: close the "ReelForge - ..." windows.
+
+Stop everything at once (PostgreSQL and Ollama keep running):
+  foreach ($p in 3000,4000,8000,8100,8188,6379) { Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force } }
+
+Don't stop while a reel is being made (Generation Progress page): the job is interrupted.
+
+
+5. RESTART AFTER CODE CHANGES
+-----------------------------
+Backend (close its window first, then):
+  cd D:\reel-creator-automation\backend
+  npm run build ; npm start
+
+media-service:
+  Get-NetTCPConnection -LocalPort 8000 -State Listen | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
+  powershell -ExecutionPolicy Bypass -File scripts\start-service.ps1 -Name media
+
+ComfyUI (after adding models or custom nodes):
+  Get-NetTCPConnection -LocalPort 8188 -State Listen | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
+  powershell -ExecutionPolicy Bypass -File scripts\start-service.ps1 -Name comfyui
+
+Never run two backends: if fixes "don't work", close ALL backend windows and start ONE.
+
+
+6. TESTS
+--------
+  cd D:\reel-creator-automation\backend
+  npm test
+
+  cd D:\reel-creator-automation\backend
+  npx tsc --noEmit -p tsconfig.json
+
+  cd D:\reel-creator-automation\frontend
+  npx tsc --noEmit -p tsconfig.json
+
+
+7. DATABASE
+-----------
+Apply new migrations (after pulling new code):
+  cd D:\reel-creator-automation\backend
+  npx prisma migrate deploy
+  npx prisma generate
+
+Check migration status:
+  cd D:\reel-creator-automation\backend
+  npx prisma migrate status
+
+Add the epic characters and Hindi voices (safe to run again, never overwrites):
+  cd D:\reel-creator-automation\backend
+  npm run db:seed:cast
+
+
+8. BACKUP / RESTORE
+-------------------
+Backup (database + media files -> D:\reelforge-backups):
+  powershell -ExecutionPolicy Bypass -File scripts\backup.ps1
+
+Restore (stop the backend first; asks you to type RESTORE):
+  powershell -ExecutionPolicy Bypass -File scripts\restore.ps1 -Dump D:\reelforge-backups\db\<file>.dump
+
+
+9. FRESH START (delete all generated stories and reels, keep setup)
+--------------------------------------------------------------------
+Close the backend window, then:
+  1. pgAdmin -> PostgreSQL 18 (local) -> database reelforge -> Query Tool ->
+     open scripts\reset-generated-content.sql -> Run (F5)
+  2. cd D:\reel-creator-automation\storage
+     Remove-Item -Recurse -Force projects, stories, tests -ErrorAction SilentlyContinue
+  3. & "D:\tools\redis\Redis-8.10.3-Windows-x64-msys2\redis-cli.exe" FLUSHDB
+  4. cd D:\reel-creator-automation
+     powershell -ExecutionPolicy Bypass -File scripts\start-all.ps1
+
+
+10. AI MODELS (only if missing)
+-------------------------------
+  ollama pull qwen2.5:7b-instruct
+  ollama pull qwen2.5vl:3b
+  ollama list
+
+
+11. SAVE CODE TO GITHUB
+-----------------------
+  cd D:\reel-creator-automation
+  git status
+  git add -A
+  git commit -m "describe the change"
+  git push
+(.env files and client_secret*.json are ignored by git: never add them by hand.)
