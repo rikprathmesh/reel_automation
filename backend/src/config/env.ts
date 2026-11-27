@@ -34,6 +34,10 @@ const Env = z.object({
   OLLAMA_TEXT_MODEL: z.string().default("qwen2.5:7b-instruct"),
   OLLAMA_VISION_MODEL: z.string().default("qwen2.5vl:3b"),
 
+  /** Free Gemini API key (aistudio.google.com, no billing). When set, Gemini writes stories; Ollama is the fallback. */
+  GEMINI_API_KEY: z.string().default(""),
+  GEMINI_TEXT_MODEL: z.string().default("gemini-2.5-flash"),
+
   TZ_NAME: z.string().default(Intl.DateTimeFormat().resolvedOptions().timeZone),
 
   GOOGLE_CLIENT_ID: z.string().default(""),

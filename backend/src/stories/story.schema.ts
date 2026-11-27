@@ -64,12 +64,18 @@ export function similarity(a: string, b: string): number {
 }
 
 /** Story quality gate: returns problems the LLM must fix, or [] when the draft is usable. */
+/** Spoken words above this share of the target make the reel noticeably longer than planned (137 s for a 60 s reel, 2026-11-27). */
+export const TOO_LONG = 1.15;
+
+export const spokenWords = (d: StoryData) => d.scenes.flatMap((s) => s.dialogue).reduce((n, l) => n + l.text.split(/\s+/).filter(Boolean).length, 0);
+
 export function storyProblems(d: StoryData, targetWords: number, minScenes = 6): string[] {
   const lines = d.scenes.flatMap((s) => s.dialogue);
   const words = lines.reduce((n, l) => n + l.text.split(/\s+/).filter(Boolean).length, 0);
   const problems: string[] = [];
   if (d.scenes.length < minScenes - 1) problems.push(`Only ${d.scenes.length} scenes; write at least ${minScenes} scenes so the story is long enough.`);
   if (words < targetWords * 0.65) problems.push(`Far too short: only ${words} spoken words, but the reel needs about ${targetWords}. Add Narrator lines that tell the story in every scene, 2-3 lines per scene.`);
+  if (words > targetWords * TOO_LONG) problems.push(`Too long: ${words} spoken words, but the reel has room for only about ${targetWords}. Shorten the lines.`);
   if (!lines.some((l) => l.speaker.toLowerCase() === "narrator")) problems.push("There are no Narrator lines. The Narrator must carry the story between character lines.");
   const first = d.scenes[0]?.dialogue[0]?.text ?? "";
   if (/^(the scene|scene|we see|in this)/i.test(d.hook.trim()) || d.hook.split(/\s+/).length > 16) problems.push(`The hook "${d.hook}" is a description. Write the literal first spoken sentence (max 12 words) that makes viewers stop scrolling.`);

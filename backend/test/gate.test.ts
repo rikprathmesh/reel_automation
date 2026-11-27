@@ -102,7 +102,12 @@ const story = (over: Partial<StoryData> = {}): StoryData => ({
 });
 
 test("story gate: a full draft with a spoken hook passes", () => {
-  assert.deepEqual(storyProblems(story(), 100), []);
+  assert.deepEqual(storyProblems(story(), 130), []);
+});
+
+test("story gate: a script far over the reel's word budget is flagged as too long", () => {
+  // 136 spoken words for a reel with room for 100 (a 60 s reel came out 137 s this way)
+  assert.ok(storyProblems(story(), 100).some((x) => /too long/i.test(x)));
 });
 
 test("story gate: a descriptive hook, too few words and no narrator are rejected", () => {

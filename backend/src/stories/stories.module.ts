@@ -13,7 +13,7 @@ import { AGE_GROUPS, CATEGORIES, CATEGORY_CASTS, EPIC_CATEGORIES, SOURCE_MATERIA
 import { AGE_RULES, CATEGORY_TEXT, LANGUAGE_RULES, storytellerSystem } from "./prompts.ts";
 import { LENGTHS, storyPlan, type StoryPlan } from "../common/lengths.ts";
 import { STYLE_IDS, stylePreset, type StyleId } from "../common/styles.ts";
-import { StorySchema, fingerprint, similarity, storyProblems, type StoryData } from "./story.schema.ts";
+import { StorySchema, TOO_LONG, fingerprint, similarity, spokenWords, storyProblems, type StoryData } from "./story.schema.ts";
 import { StoryBible, UNDERSTANDING_SYSTEM, bibleText, faithfulnessProblems } from "./understanding.ts";
 import { PromptsModule } from "../prompts/prompts.module.ts";
 import { PromptsService } from "../prompts/prompts.service.ts";
@@ -46,6 +46,25 @@ const DUPLICATE_THRESHOLD = 0.45;
 
 /** Words that push SD 1.5 checkpoints towards photographs; every style here is drawn/animated. */
 const PHOTO_WORDS = /\b(photo-?realistic|hyper-?realistic|realistic|photograph(y|ic)?|photo|cinematic|film still|dslr|8k|4k|bokeh|depth of field|dramatic lighting|moody|dark and gloomy)\b,?/gi;
+
+/** Name comparison that ignores honorifics ("Lord Krishna" = "Krishna ji" = "Krishna"). */
+const normName = (s: string) => s.toLowerCase().replace(/\b(lord|shri|sri|bhagwan|mata|maharaj)\b|\bji\b/g, "").replace(/[^\p{L}\p{N}]+/gu, "");
+
+/**
+ * May a saved character appear in a story of this category? Epic categories use their own cast; every other
+ * category uses the untagged cast plus characters made for that category. This keeps epic figures (Krishna,
+ * Ravana, ...) out of a rabbit-and-squirrel moral story (seen 2026-11-27: the 7B model added both).
+ */
+function castAllowed(c: { categories: string[] }, category: StoryCategory): boolean {
+  if ((EPIC_CATEGORIES as readonly string[]).includes(category)) {
+    const tags: string[] = CATEGORY_CASTS[category as keyof typeof CATEGORY_CASTS] ?? [category];
+    return c.categories.some((t) => tags.includes(t));
+  }
+  return c.categories.length === 0 || c.categories.includes(category);
+}
+
+/** The creator named this character themselves (their idea or story text), so it stays even outside its category. */
+const mentioned = (text: string | null, name: string) => !!text && normName(name).length > 0 && normName(text).includes(normName(name));
 
 function cleanVisualPrompts(d: StoryData) {
   for (const sc of d.scenes) sc.visualPrompt = sc.visualPrompt.replace(PHOTO_WORDS, "").replace(/\s{2,}/g, " ").replace(/\s+,/g, ",").trim();
@@ -150,8 +169,15 @@ export class StoryEngine implements OnApplicationBootstrap {
     } else {
       // AI story: the AI invents the premise itself, then it is understood and cast exactly like a creator's idea
       if (mode === "generated") sourceText = await this.inventPremise(req.category, age, cast, recent);
-      bible = await this.understand({ category: req.category, mode: mode === "generated" ? "idea" : mode, age, sourceText, parent });
-      cast = await this.resolveCast(bible, req.category);
+      const understandArgs = { category: req.category, mode: mode === "generated" ? "idea" : mode, age, sourceText, parent } as const;
+      bible = await this.understand(understandArgs);
+      // characters from another category that the creator never asked for: understand again without them
+      const intruders = await this.intruders(bible, req.category, sourceText);
+      if (intruders.length) {
+        await this.activity.record({ entityType: "story", action: "cast_intruders", level: "warn", message: `"${bible.title}": ${intruders.join(", ")} don't belong in this category - rewriting the story without them` });
+        bible = await this.understand({ ...understandArgs, forbid: intruders });
+      }
+      cast = await this.resolveCast(bible, req.category, sourceText);
     }
 
     const castText = cast.map((c) => `- ${c.name}${c.isStoryteller ? " (main storyteller)" : ""}: ${c.description} Personality: ${c.personality}. Expressions available: ${Object.keys((c.expressionPresets as object) ?? {}).join(", ") || "neutral"}.`).join("\n");
@@ -167,7 +193,8 @@ export class StoryEngine implements OnApplicationBootstrap {
         `CATEGORY: ${CATEGORY_TEXT[req.category]}`,
         `LANGUAGE: ${LANGUAGE_RULES[language]}`,
         `AUDIENCE: ${rules.audience} (${rules.label})`,
-        `TARGET LENGTH: about ${plan.targetSec} seconds when read aloud (never under 60 seconds). Spoken words ≈ ${plan.words}. ${plan.minScenes}-${plan.maxScenes} scenes of about ${plan.sceneSec} seconds each (one animated shot per scene), each with ${plan.linesPerScene}-${plan.linesPerScene + 1} spoken lines.`,
+        `TARGET LENGTH: ${plan.targetSec} seconds when read aloud. ALL spoken lines together (Narrator + characters): ${Math.round(plan.words * 0.9)}-${Math.round(plan.words * 1.1)} words, never more - the reel must not run longer than ${plan.targetSec} seconds.`,
+        `SCENES: ${plan.minScenes}-${plan.maxScenes} scenes of about ${plan.sceneSec} seconds each (one animated shot per scene), each with ${plan.linesPerScene}-${plan.linesPerScene + 1} spoken lines.`,
         bible ? `STORY BIBLE — this is the story to tell. Follow it exactly:\n${bibleText(bible)}\nIn every scene, "events" lists the event numbers it shows. Cover every event, in order. Do not add events or characters.` : "",
         mode === "full_story" && sourceText ? `THE CREATOR'S STORY (keep their wording in the Narrator lines wherever possible; never change what happens):\n${sourceText}` : "",
         `VISUAL STYLE: ${stylePreset(style).label}. ${stylePreset(style).writing} Write every scene's visualPrompt so it works in this style.`,
@@ -213,8 +240,9 @@ export class StoryEngine implements OnApplicationBootstrap {
         // the YouTube/Instagram title stays in the reel's language
         data.title = bible.title;
       }
-      // still weak → targeted repair instead of shipping a thin story
+      // still weak → targeted repair instead of shipping a thin story; too long → shortened to fit the reel
       if (problems.length) await this.repair(data, plan, language);
+      if (spokenWords(data) > plan.words * TOO_LONG) await this.shorten(data, plan, language);
       // narration is always the actual spoken lines, so audio, captions and script agree
       data.narration = data.scenes.flatMap((sc) => sc.dialogue.map((l) => (l.speaker.toLowerCase() === "narrator" ? l.text : `${l.speaker}: ${l.text}`))).join(String.fromCharCode(10));
       const fp = fingerprint(data);
@@ -238,8 +266,10 @@ export class StoryEngine implements OnApplicationBootstrap {
   }
 
   /** Story Understanding Engine: idea / full story / next episode → story bible. */
-  private async understand(a: { category: StoryCategory; mode: StorySource; age: AgeGroup; sourceText: string | null; parent: { id: string; title: string; episodeNo: number; understanding: unknown; hook: string; scripts: { narration: string }[] } | null }): Promise<StoryBible> {
-    const known = await this.prisma.character.findMany({ where: { deletedAt: null, active: true }, select: { name: true, species: true, description: true } });
+  private async understand(a: { category: StoryCategory; mode: StorySource; age: AgeGroup; sourceText: string | null; forbid?: string[]; parent: { id: string; title: string; episodeNo: number; understanding: unknown; hook: string; scripts: { narration: string }[] } | null }): Promise<StoryBible> {
+    // only characters that belong to this category (or that the creator named) are offered for reuse
+    const known = (await this.prisma.character.findMany({ where: { deletedAt: null, active: true }, select: { name: true, species: true, description: true, categories: true } }))
+      .filter((k) => castAllowed(k, a.category) || mentioned(a.sourceText, k.name));
     const parentBible = a.parent ? StoryBible.safeParse(a.parent.understanding) : null;
     const prompt = [
       `CATEGORY: ${CATEGORY_TEXT[a.category]}`,
@@ -249,6 +279,7 @@ export class StoryEngine implements OnApplicationBootstrap {
       a.mode === "idea" ? `THE IDEA (develop it into a complete short story with a clear beginning, middle and ending):\n${a.sourceText}` : "",
       a.mode === "continuation" && a.parent ? `PREVIOUS EPISODE ${a.parent.episodeNo}: "${a.parent.title}"\n${parentBible?.success ? bibleText(parentBible.data) : a.parent.scripts[0]?.narration.slice(0, 3000) ?? a.parent.hook}\n\nWrite the story bible for EPISODE ${a.parent.episodeNo + 1}: the same characters with exactly the same names, a new adventure that continues naturally from where the previous episode ended.${a.sourceText ? ` Direction from the creator: ${a.sourceText}` : ""}` : "",
       known.length ? `PERMANENT CHARACTERS THAT ALREADY EXIST (if a character in the story is one of these, use exactly this name):\n${known.map((k) => `- ${k.name} (${k.species || k.description.slice(0, 70)})`).join("\n")}` : "",
+      a.forbid?.length ? `DO NOT include ${a.forbid.join(", ")} or any character the story doesn't need. Use only the characters the idea itself describes.` : "",
       "Write names, descriptions and events in English even when the story is written in another language. Keep dialogueHints in the story's original language.",
     ].filter(Boolean).join("\n\n");
     const llm = await this.registry.get("text");
@@ -273,15 +304,30 @@ export class StoryEngine implements OnApplicationBootstrap {
    * Maps the bible's characters to permanent characters: existing ones are reused (never redesigned), new ones are
    * designed once (profile + reference prompts) and tagged with the story's category.
    */
-  private async resolveCast(bible: StoryBible, category: StoryCategory): Promise<CastRow[]> {
-    const norm = (s: string) => s.toLowerCase().replace(/\b(lord|shri|sri|bhagwan|mata|maharaj)\b|\bji\b/g, "").replace(/[^\p{L}\p{N}]+/gu, "");
+  /** Saved characters in the bible that belong to another category and that the creator didn't name. */
+  private async intruders(bible: StoryBible, category: StoryCategory, sourceText: string | null): Promise<string[]> {
+    const all = await this.prisma.character.findMany({ select: { name: true, categories: true } });
+    return bible.characters.flatMap((bc) => {
+      const c = this.findSaved(all, bc.name);
+      return c && !castAllowed(c, category) && !mentioned(sourceText, c.name) ? [c.name] : [];
+    });
+  }
+
+  private findSaved<T extends { name: string }>(all: T[], name: string): T | undefined {
+    const n = normName(name);
+    return all.find((x) => normName(x.name) === n) ?? all.find((x) => n.length >= 4 && normName(x.name).length >= 4 && (normName(x.name).includes(n) || n.includes(normName(x.name))));
+  }
+
+  private async resolveCast(bible: StoryBible, category: StoryCategory, sourceText: string | null = null): Promise<CastRow[]> {
     const all = await this.prisma.character.findMany();
     const out: CastRow[] = [];
     const renamed = new Map<string, string>();
+    const dropped = new Set<string>();
     for (const bc of bible.characters) {
       if (/^narrator$/i.test(bc.name.trim())) continue;
-      const n = norm(bc.name);
-      let c = all.find((x) => norm(x.name) === n) ?? all.find((x) => n.length >= 4 && norm(x.name).length >= 4 && (norm(x.name).includes(n) || n.includes(norm(x.name))));
+      let c = this.findSaved(all, bc.name);
+      // last guard: a character from another category the creator didn't ask for never joins the cast
+      if (c && !castAllowed(c, category) && !mentioned(sourceText, c.name)) { dropped.add(bc.name); continue; }
       if (c?.deletedAt) {
         c = await this.prisma.character.update({ where: { id: c.id }, data: { deletedAt: null, active: true } });
         await this.activity.record({ entityType: "character", entityId: c.id, action: "restored", message: `${c.name} restored: the story uses this character again` });
@@ -292,6 +338,11 @@ export class StoryEngine implements OnApplicationBootstrap {
       }
       if (c.name !== bc.name) renamed.set(bc.name, c.name);
       if (!out.some((o) => o.id === c!.id)) out.push(c);
+    }
+    if (dropped.size) {
+      bible.characters = bible.characters.filter((c) => !dropped.has(c.name));
+      for (const e of bible.events) e.characters = e.characters.filter((n) => !dropped.has(n));
+      await this.activity.record({ entityType: "story", action: "cast_intruders_removed", level: "warn", message: `"${bible.title}": removed ${[...dropped].join(", ")} (not part of this category)` });
     }
     // from here on the bible speaks of characters by their permanent names
     const fix = (name: string) => renamed.get(name) ?? name;
@@ -316,26 +367,67 @@ export class StoryEngine implements OnApplicationBootstrap {
   private async repair(data: StoryData, plan: StoryPlan, language: Language) {
     const targetWords = plan.words;
     const llm = await this.registry.get("text");
-    const perScene = Math.max(12, Math.round(targetWords / Math.max(1, data.scenes.length)));
+    // narration is only added for the words that are actually missing (it used to add 2-3 lines per scene to an
+    // already long script, which turned a 60 s reel into 137 s)
+    const missing = targetWords - spokenWords(data);
+    const needsNarration = missing > targetWords * 0.15 || !data.scenes.some((s) => s.dialogue.some((l) => l.speaker.toLowerCase() === "narrator"));
+    if (!needsNarration) { this.ensureHook(data); return; }
+    const perScene = Math.max(6, Math.round(Math.max(missing, targetWords * 0.3) / Math.max(1, data.scenes.length)));
     const Narration = z.object({ scenes: z.array(z.object({ index: z.number(), narratorLines: z.array(z.string()) })) });
     const { data: n } = await llm.generateJson({
       system: `You are the warm, gentle narrator of a short animated story for children aged 1-10. ${LANGUAGE_RULES[language]} Write simple, vivid, spoken narration in short sentences a small child understands. Never describe camera or scenes technically.`,
-      prompt: `Story "${data.title}". Moral: ${data.moral}.\nFor EACH scene below write 2-3 Narrator lines (about ${perScene} words per scene in total) that tell what happens and build emotion, so the story flows when read aloud.\n${data.scenes.map((s, i) => `Scene ${i}: ${s.description} | character lines: ${s.dialogue.map((d) => `${d.speaker}: ${d.text}`).join(" / ") || "none"}`).join("\n")}`,
+      prompt: `Story "${data.title}". Moral: ${data.moral}.\nFor EACH scene below write 1-2 short Narrator lines (about ${perScene} words per scene in total, never more) that tell what happens and build emotion, so the story flows when read aloud.\n${data.scenes.map((s, i) => `Scene ${i}: ${s.description} | character lines: ${s.dialogue.map((d) => `${d.speaker}: ${d.text}`).join(" / ") || "none"}`).join("\n")}`,
     }, Narration, { maxTokens: 1500 + data.scenes.length * 250, temperature: 0.7 });
     for (const sc of n.scenes) {
       const scene = data.scenes[sc.index];
       if (!scene) continue;
       const existing = new Set(scene.dialogue.map((d) => d.text.trim().toLowerCase()));
-      const lines = sc.narratorLines.map((t) => t.trim()).filter((t) => t && !existing.has(t.toLowerCase())).slice(0, 3);
+      const lines = sc.narratorLines.map((t) => t.trim()).filter((t) => t && !existing.has(t.toLowerCase())).slice(0, 2);
       scene.dialogue = [...lines.map((text) => ({ speaker: "Narrator", text, emotion: "warm storytelling" })), ...scene.dialogue];
     }
-    // the hook must be the very first spoken line
+    this.ensureHook(data);
+    await this.activity.record({ entityType: "story", action: "narration_repaired", message: `Added narrator lines to "${data.title}" (${storyProblems(data, targetWords, plan.minScenes).length} remaining issue(s))` });
+  }
+
+  /** The hook must be the very first spoken line. */
+  private ensureHook(data: StoryData) {
     const first = data.scenes[0]?.dialogue[0]?.text ?? "";
     const hook = data.hook.trim();
     if (hook && hook.split(/\s+/).length <= 16 && !/^(the scene|scene|we see)/i.test(hook) && !first.toLowerCase().startsWith(hook.toLowerCase().slice(0, 15))) {
       data.scenes[0]?.dialogue.unshift({ speaker: "Narrator", text: hook, emotion: "intriguing" });
     }
-    await this.activity.record({ entityType: "story", action: "narration_repaired", message: `Added narrator lines to "${data.title}" (${storyProblems(data, targetWords, plan.minScenes).length} remaining issue(s))` });
+  }
+
+  /**
+   * Too many words for the reel's length: the model rewrites every scene's lines shorter (same speakers, same story).
+   * If it still overshoots, the last lines of the longest scenes are dropped so the reel never runs far over its length.
+   */
+  private async shorten(data: StoryData, plan: StoryPlan, language: Language) {
+    const before = spokenWords(data);
+    const llm = await this.registry.get("text");
+    const perScene = Math.max(6, Math.round(plan.words / Math.max(1, data.scenes.length)));
+    const Shorter = z.object({ scenes: z.array(z.object({ index: z.number(), lines: z.array(z.object({ speaker: z.string(), text: z.string() })) })) });
+    try {
+      const { data: s } = await llm.generateJson({
+        system: `You are the script editor of a short animated reel. ${LANGUAGE_RULES[language]} You shorten spoken lines so the reel fits its length, keeping the story, the speakers and the emotional beats. Simple words a child understands.`,
+        prompt: `The reel is ${plan.targetSec} seconds, so ALL lines together may have at most ${plan.words} words (about ${perScene} per scene). Now they have ${before}.\nRewrite each scene's lines shorter: keep the same speakers (you may merge or drop Narrator lines), keep scene 0's first line as the hook.\n${data.scenes.map((sc, i) => `Scene ${i}:\n${sc.dialogue.map((d) => `  ${d.speaker}: ${d.text}`).join("\n")}`).join("\n")}`,
+      }, Shorter, { maxTokens: 1000 + data.scenes.length * 250, temperature: 0.4 });
+      for (const sc of s.scenes) {
+        const scene = data.scenes[sc.index];
+        const lines = sc.lines.filter((l) => l.text.trim());
+        if (!scene || !lines.length) continue;
+        scene.dialogue = lines.map((l, i) => ({ speaker: l.speaker.trim() || "Narrator", text: l.text.trim(), emotion: scene.dialogue.find((d) => d.speaker === l.speaker)?.emotion ?? scene.dialogue[i]?.emotion ?? "warm storytelling" }));
+      }
+    } catch (e) {
+      this.log.warn(`shortening failed: ${e instanceof Error ? e.message : e}`);
+    }
+    // hard cap: drop trailing lines of the wordiest scenes (never a scene's only line)
+    while (spokenWords(data) > plan.words * TOO_LONG) {
+      const longest = data.scenes.filter((sc) => sc.dialogue.length > 1).sort((a, b) => spokenWords({ ...data, scenes: [b] }) - spokenWords({ ...data, scenes: [a] }))[0];
+      if (!longest) break;
+      longest.dialogue.pop();
+    }
+    await this.activity.record({ entityType: "story", action: "script_shortened", message: `"${data.title}" shortened from ${before} to ${spokenWords(data)} spoken words to fit ${plan.targetSec} s` });
   }
 
   /** Maps character names the LLM used to cast IDs (unknown names are ignored, duplicates removed). */

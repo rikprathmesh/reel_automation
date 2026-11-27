@@ -8,6 +8,7 @@ import { zod } from "../common/zod.pipe.ts";
 import { CurrentUser, Roles, type SessionUser } from "../auth/decorators.ts";
 import { ServiceClient } from "./service-client.ts";
 import { OllamaTextProvider } from "./ollama.provider.ts";
+import { GeminiTextProvider } from "./gemini.provider.ts";
 import { AgentReachReferenceProvider, ComfyImageProvider, MediaComposer, MediaVideoProvider, MediaVoiceProvider, WhisperTranscriptionProvider } from "./service.providers.ts";
 import type { Capability, CapabilityMap, ProviderInfo } from "./types.ts";
 
@@ -25,6 +26,7 @@ const SETTING_KEY = "providers";
 export class ProviderRegistry {
   private readonly providers = new Map<Capability, Map<string, CapabilityMap[Capability]>>();
   private selection: Selection | null = null;
+  private readonly defaults: Selection;
   /** FFmpeg editing/rendering in the media service (deterministic tooling, not a swappable AI provider). */
   readonly composer: MediaComposer;
 
@@ -33,7 +35,12 @@ export class ProviderRegistry {
     const media = new ServiceClient("media-service", config.get("MEDIA_SERVICE_URL", { infer: true }), token);
     const reference = new ServiceClient("reference-service", config.get("REFERENCE_SERVICE_URL", { infer: true }), token);
     this.composer = new MediaComposer(media);
-    this.register("text", new OllamaTextProvider(config.get("OLLAMA_URL", { infer: true }), config.get("OLLAMA_TEXT_MODEL", { infer: true }), config.get("OLLAMA_VISION_MODEL", { infer: true })));
+    const ollama = new OllamaTextProvider(config.get("OLLAMA_URL", { infer: true }), config.get("OLLAMA_TEXT_MODEL", { infer: true }), config.get("OLLAMA_VISION_MODEL", { infer: true }));
+    const geminiKey = config.get("GEMINI_API_KEY", { infer: true });
+    this.register("text", ollama);
+    this.register("text", new GeminiTextProvider(geminiKey, config.get("GEMINI_TEXT_MODEL", { infer: true }), ollama));
+    // a free Gemini key makes the cloud model the default writer (minutes instead of hours on this CPU)
+    this.defaults = { ...DEFAULT_SELECTION, text: geminiKey ? "gemini" : "ollama" };
     this.register("image", new ComfyImageProvider(media));
     this.register("video", new MediaVideoProvider(media, "kenburns"));
     this.register("video", new MediaVideoProvider(media, "animatediff"));
@@ -51,7 +58,7 @@ export class ProviderRegistry {
   private async currentSelection(): Promise<Selection> {
     if (!this.selection) {
       const row = await this.prisma.systemSetting.findUnique({ where: { key: SETTING_KEY } });
-      this.selection = { ...DEFAULT_SELECTION, ...((row?.value as Partial<Selection>) ?? {}) };
+      this.selection = { ...this.defaults, ...((row?.value as Partial<Selection>) ?? {}) };
     }
     return this.selection;
   }
